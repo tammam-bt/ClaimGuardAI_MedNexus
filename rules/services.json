@@ -1,0 +1,38 @@
+{
+  "SVC-CONSULT": {
+    "description": "Synthetic outpatient consultation",
+    "base_price": 180,
+    "max_price": 350,
+    "max_quantity": 1
+  },
+  "SVC-LAB": {
+    "description": "Synthetic laboratory panel",
+    "base_price": 120,
+    "max_price": 260,
+    "max_quantity": 3
+  },
+  "SVC-IMAGE": {
+    "description": "Synthetic imaging service",
+    "base_price": 1500,
+    "max_price": 2200,
+    "max_quantity": 1
+  },
+  "SVC-THERAPY": {
+    "description": "Synthetic therapy session",
+    "base_price": 240,
+    "max_price": 450,
+    "max_quantity": 4
+  },
+  "SVC-DENTAL": {
+    "description": "Synthetic dental service",
+    "base_price": 400,
+    "max_price": 800,
+    "max_quantity": 2
+  },
+  "SVC-PHARM": {
+    "description": "Synthetic pharmacy item",
+    "base_price": 60,
+    "max_price": 200,
+    "max_quantity": 10
+  }
+}

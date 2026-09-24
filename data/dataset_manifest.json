@@ -1,0 +1,267 @@
+{
+  "version": "1.0.0",
+  "generated_on": "2026-09-17",
+  "synthetic": true,
+  "splits": {
+    "development": {
+      "claims": 400,
+      "rule_results": 6000,
+      "statuses": {
+        "PASS": 5014,
+        "NOT_APPLICABLE": 487,
+        "UNABLE_TO_ASSESS": 180,
+        "FAIL": 319
+      },
+      "by_rule": {
+        "R001": {
+          "PASS": 364,
+          "FAIL": 36
+        },
+        "R002": {
+          "PASS": 381,
+          "UNABLE_TO_ASSESS": 8,
+          "FAIL": 11
+        },
+        "R003": {
+          "PASS": 356,
+          "FAIL": 28,
+          "UNABLE_TO_ASSESS": 16
+        },
+        "R004": {
+          "PASS": 368,
+          "FAIL": 28,
+          "UNABLE_TO_ASSESS": 4
+        },
+        "R005": {
+          "PASS": 366,
+          "FAIL": 26,
+          "UNABLE_TO_ASSESS": 8
+        },
+        "R006": {
+          "PASS": 368,
+          "FAIL": 24,
+          "UNABLE_TO_ASSESS": 8
+        },
+        "R007": {
+          "PASS": 369,
+          "FAIL": 23,
+          "UNABLE_TO_ASSESS": 8
+        },
+        "R008": {
+          "NOT_APPLICABLE": 159,
+          "PASS": 212,
+          "UNABLE_TO_ASSESS": 18,
+          "FAIL": 11
+        },
+        "R009": {
+          "NOT_APPLICABLE": 159,
+          "PASS": 194,
+          "UNABLE_TO_ASSESS": 32,
+          "FAIL": 15
+        },
+        "R010": {
+          "NOT_APPLICABLE": 158,
+          "UNABLE_TO_ASSESS": 28,
+          "PASS": 199,
+          "FAIL": 15
+        },
+        "R011": {
+          "PASS": 390,
+          "FAIL": 10
+        },
+        "R012": {
+          "PASS": 377,
+          "FAIL": 23
+        },
+        "R013": {
+          "PASS": 344,
+          "UNABLE_TO_ASSESS": 26,
+          "FAIL": 30
+        },
+        "R014": {
+          "PASS": 353,
+          "FAIL": 20,
+          "UNABLE_TO_ASSESS": 16,
+          "NOT_APPLICABLE": 11
+        },
+        "R015": {
+          "PASS": 373,
+          "UNABLE_TO_ASSESS": 8,
+          "FAIL": 19
+        }
+      }
+    },
+    "validation": {
+      "claims": 150,
+      "rule_results": 2250,
+      "statuses": {
+        "PASS": 1879,
+        "NOT_APPLICABLE": 181,
+        "UNABLE_TO_ASSESS": 73,
+        "FAIL": 117
+      },
+      "by_rule": {
+        "R001": {
+          "PASS": 133,
+          "FAIL": 17
+        },
+        "R002": {
+          "PASS": 143,
+          "UNABLE_TO_ASSESS": 3,
+          "FAIL": 4
+        },
+        "R003": {
+          "PASS": 137,
+          "FAIL": 7,
+          "UNABLE_TO_ASSESS": 6
+        },
+        "R004": {
+          "PASS": 139,
+          "FAIL": 7,
+          "UNABLE_TO_ASSESS": 4
+        },
+        "R005": {
+          "PASS": 141,
+          "FAIL": 6,
+          "UNABLE_TO_ASSESS": 3
+        },
+        "R006": {
+          "PASS": 137,
+          "FAIL": 10,
+          "UNABLE_TO_ASSESS": 3
+        },
+        "R007": {
+          "PASS": 140,
+          "UNABLE_TO_ASSESS": 3,
+          "FAIL": 7
+        },
+        "R008": {
+          "PASS": 80,
+          "UNABLE_TO_ASSESS": 7,
+          "NOT_APPLICABLE": 59,
+          "FAIL": 4
+        },
+        "R009": {
+          "PASS": 73,
+          "UNABLE_TO_ASSESS": 13,
+          "NOT_APPLICABLE": 59,
+          "FAIL": 5
+        },
+        "R010": {
+          "PASS": 74,
+          "NOT_APPLICABLE": 59,
+          "UNABLE_TO_ASSESS": 12,
+          "FAIL": 5
+        },
+        "R011": {
+          "PASS": 146,
+          "FAIL": 4
+        },
+        "R012": {
+          "PASS": 137,
+          "FAIL": 13
+        },
+        "R013": {
+          "PASS": 129,
+          "UNABLE_TO_ASSESS": 10,
+          "FAIL": 11
+        },
+        "R014": {
+          "PASS": 133,
+          "UNABLE_TO_ASSESS": 6,
+          "NOT_APPLICABLE": 4,
+          "FAIL": 7
+        },
+        "R015": {
+          "PASS": 137,
+          "FAIL": 10,
+          "UNABLE_TO_ASSESS": 3
+        }
+      }
+    },
+    "stress": {
+      "claims": 50,
+      "rule_results": 750,
+      "statuses": {
+        "PASS": 599,
+        "NOT_APPLICABLE": 63,
+        "FAIL": 26,
+        "UNABLE_TO_ASSESS": 62
+      },
+      "by_rule": {
+        "R001": {
+          "PASS": 42,
+          "FAIL": 8
+        },
+        "R002": {
+          "PASS": 46,
+          "UNABLE_TO_ASSESS": 4
+        },
+        "R003": {
+          "PASS": 39,
+          "UNABLE_TO_ASSESS": 8,
+          "FAIL": 3
+        },
+        "R004": {
+          "PASS": 50
+        },
+        "R005": {
+          "PASS": 46,
+          "UNABLE_TO_ASSESS": 4
+        },
+        "R006": {
+          "PASS": 46,
+          "UNABLE_TO_ASSESS": 4
+        },
+        "R007": {
+          "PASS": 46,
+          "UNABLE_TO_ASSESS": 4
+        },
+        "R008": {
+          "NOT_APPLICABLE": 22,
+          "PASS": 24,
+          "UNABLE_TO_ASSESS": 4
+        },
+        "R009": {
+          "NOT_APPLICABLE": 22,
+          "PASS": 20,
+          "FAIL": 3,
+          "UNABLE_TO_ASSESS": 5
+        },
+        "R010": {
+          "NOT_APPLICABLE": 19,
+          "PASS": 19,
+          "UNABLE_TO_ASSESS": 9,
+          "FAIL": 3
+        },
+        "R011": {
+          "PASS": 50
+        },
+        "R012": {
+          "PASS": 47,
+          "FAIL": 3
+        },
+        "R013": {
+          "FAIL": 6,
+          "PASS": 36,
+          "UNABLE_TO_ASSESS": 8
+        },
+        "R014": {
+          "PASS": 42,
+          "UNABLE_TO_ASSESS": 8
+        },
+        "R015": {
+          "PASS": 46,
+          "UNABLE_TO_ASSESS": 4
+        }
+      }
+    }
+  },
+  "authoritative_format": "normalized JSONL",
+  "notes": [
+    "No real patient records, payer policies, clinical codes or adjudication outcomes.",
+    "Development labels are open; validation labels are open but should be consulted after a frozen development run.",
+    "Stress labels are open. All splits use disjoint patient, claim and invoice IDs.",
+    "A separate mentor-held set exists. Do not use IDs as model features."
+  ]
+}

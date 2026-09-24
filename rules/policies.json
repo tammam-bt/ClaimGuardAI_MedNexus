@@ -1,0 +1,74 @@
+{
+  "EDU-BASIC": {
+    "policy_id": "EDU-BASIC",
+    "version": "1.0.0",
+    "payer_id": "EDU-PAYER",
+    "currency": "SAR",
+    "submission_window_days": 30,
+    "allowed_providers": [
+      "EDU-PROV-01",
+      "EDU-PROV-02",
+      "EDU-PROV-03"
+    ],
+    "auth_required_services": [
+      "SVC-IMAGE",
+      "SVC-THERAPY"
+    ],
+    "required_documents": {
+      "SVC-IMAGE": "imaging-report",
+      "SVC-DENTAL": "service-note"
+    },
+    "max_unit_price": {
+      "SVC-CONSULT": 350,
+      "SVC-LAB": 260,
+      "SVC-IMAGE": 2200,
+      "SVC-THERAPY": 450,
+      "SVC-DENTAL": 800,
+      "SVC-PHARM": 200
+    },
+    "max_quantity_per_line": {
+      "SVC-CONSULT": 1,
+      "SVC-LAB": 3,
+      "SVC-IMAGE": 1,
+      "SVC-THERAPY": 4,
+      "SVC-DENTAL": 2,
+      "SVC-PHARM": 10
+    }
+  },
+  "EDU-PLUS": {
+    "policy_id": "EDU-PLUS",
+    "version": "1.0.0",
+    "payer_id": "EDU-PAYER",
+    "currency": "SAR",
+    "submission_window_days": 60,
+    "allowed_providers": [
+      "EDU-PROV-01",
+      "EDU-PROV-02",
+      "EDU-PROV-03"
+    ],
+    "auth_required_services": [
+      "SVC-IMAGE",
+      "SVC-THERAPY"
+    ],
+    "required_documents": {
+      "SVC-IMAGE": "imaging-report",
+      "SVC-DENTAL": "service-note"
+    },
+    "max_unit_price": {
+      "SVC-CONSULT": 350,
+      "SVC-LAB": 260,
+      "SVC-IMAGE": 2200,
+      "SVC-THERAPY": 450,
+      "SVC-DENTAL": 800,
+      "SVC-PHARM": 200
+    },
+    "max_quantity_per_line": {
+      "SVC-CONSULT": 1,
+      "SVC-LAB": 3,
+      "SVC-IMAGE": 1,
+      "SVC-THERAPY": 4,
+      "SVC-DENTAL": 2,
+      "SVC-PHARM": 10
+    }
+  }
+}

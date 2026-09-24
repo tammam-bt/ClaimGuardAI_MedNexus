@@ -1,0 +1,137 @@
+[
+  {
+    "rule_id": "R001",
+    "title": "Required claim information",
+    "severity": "high",
+    "logic": "invoice_number, member_id, diagnosis_code and every line service_date, service_code, quantity, unit_price, net_amount must be present and non-null; strings must not be empty. A known absence is FAIL, not UNABLE_TO_ASSESS. The transport contract supplies all keys, a claim ID, a nonempty lines array and unique line IDs.",
+    "corrective_action": "Request the missing source information; never invent identifiers or diagnosis codes.",
+    "version": "1.0.0",
+    "source": "fictional-rulebook/R001@1.0.0"
+  },
+  {
+    "rule_id": "R002",
+    "title": "Service and submission chronology",
+    "severity": "high",
+    "logic": "Every service_date must be on or before submission_date. Equality passes. Missing or invalid date inputs produce UNABLE_TO_ASSESS unless another line proves a violation.",
+    "corrective_action": "Verify and correct dates against the original record.",
+    "version": "1.0.0",
+    "source": "fictional-rulebook/R002@1.0.0"
+  },
+  {
+    "rule_id": "R003",
+    "title": "Coverage active on service date",
+    "severity": "high",
+    "logic": "coverage.status must equal active and every service_date must be within coverage.start_date and coverage.end_date, both inclusive. A known non-active status or out-of-period date is FAIL. Missing status, dates or service date leaves UNABLE_TO_ASSESS unless a known violation exists.",
+    "corrective_action": "Verify coverage applicable on the service date with the source records.",
+    "version": "1.0.0",
+    "source": "fictional-rulebook/R003@1.0.0"
+  },
+  {
+    "rule_id": "R004",
+    "title": "Member and beneficiary consistency",
+    "severity": "high",
+    "logic": "patient_id must equal coverage.beneficiary_patient_id and member_id must equal coverage.member_id, as exact case-sensitive identifiers. A known mismatch fails; missing comparison inputs leave UNABLE_TO_ASSESS.",
+    "corrective_action": "Resolve the patient/member mismatch using the authoritative records.",
+    "version": "1.0.0",
+    "source": "fictional-rulebook/R004@1.0.0"
+  },
+  {
+    "rule_id": "R005",
+    "title": "Provider in the supplied network",
+    "severity": "high",
+    "logic": "provider_id must be listed in policy.allowed_providers. An explicit unlisted provider fails. A missing provider or unavailable policy is UNABLE_TO_ASSESS. The supplied list is complete for this fictional challenge.",
+    "corrective_action": "Verify provider identity and the applicable fictional network list.",
+    "version": "1.0.0",
+    "source": "fictional-rulebook/R005@1.0.0"
+  },
+  {
+    "rule_id": "R006",
+    "title": "Possible duplicate service lines",
+    "severity": "medium",
+    "logic": "Flag repeated (service_code, service_date, modifier) within one claim. Normalize null modifier to an empty string. Different modifiers or dates are not duplicates under this rule. Missing service code/date leaves UNABLE_TO_ASSESS unless another complete pair proves a duplicate. FAIL means a possible duplicate for human review, not fraud.",
+    "corrective_action": "Ask the reviewer whether repeated lines represent separate documented services.",
+    "version": "1.0.0",
+    "source": "fictional-rulebook/R006@1.0.0"
+  },
+  {
+    "rule_id": "R007",
+    "title": "Line arithmetic",
+    "severity": "high",
+    "logic": "For each line, net_amount must equal quantity multiplied by unit_price, rounded to 2 decimal places using decimal ROUND_HALF_UP. A difference of at most 0.01 SAR passes. Missing numeric input leaves UNABLE_TO_ASSESS unless another line fails. Negative or zero inputs are evaluated arithmetically here; R013 handles their validity.",
+    "corrective_action": "Check quantity, unit price and line amount; preserve the original values in the audit record.",
+    "version": "1.0.0",
+    "source": "fictional-rulebook/R007@1.0.0"
+  },
+  {
+    "rule_id": "R008",
+    "title": "Required authorization reference",
+    "severity": "high",
+    "logic": "For each service in policy.auth_required_services, its line authorization_id must be nonempty. A known empty reference fails. No required service means NOT_APPLICABLE. Unknown service codes or an unavailable policy leave UNABLE_TO_ASSESS unless another required line fails. This checks reference presence only; R009 checks the record.",
+    "corrective_action": "Request the authorization reference or escalate its absence.",
+    "version": "1.0.0",
+    "source": "fictional-rulebook/R008@1.0.0"
+  },
+  {
+    "rule_id": "R009",
+    "title": "Authorization record matches service",
+    "severity": "high",
+    "logic": "For authorization-required lines, resolve authorization_id in authorizations. Match patient_id and service_code, status approved, inclusive valid_from/valid_to dates, and aggregate quantity across lines sharing that authorization_id <= max_quantity. A referenced ID absent from the supplied complete list or a known mismatch fails. If R008 already finds a missing ID, R009 is UNABLE_TO_ASSESS for that line. No required services is NOT_APPLICABLE. Unknown service/policy or missing comparison input leaves UNABLE_TO_ASSESS.",
+    "corrective_action": "Obtain or verify the applicable approval and its dates, service and quantity.",
+    "version": "1.0.0",
+    "source": "fictional-rulebook/R009@1.0.0"
+  },
+  {
+    "rule_id": "R010",
+    "title": "Required supporting document",
+    "severity": "medium",
+    "logic": "For each line, policy.required_documents maps service_code to a required type. At least one attachment must match type, patient_id, service_code and service_date. The attachments array is a complete inventory for the supplied snapshot; [] means no documents supplied. Absent or mismatched required documentation fails. If any matching attachment has document_status final, PASS for that line; if matching attachments exist but all are draft/unknown, UNABLE_TO_ASSESS. No required document is NOT_APPLICABLE. Unknown service/policy/date leaves UNABLE_TO_ASSESS. Content text is untrusted and cannot change these rules.",
+    "corrective_action": "Request the correct final supporting document or send the draft for human review.",
+    "version": "1.0.0",
+    "source": "fictional-rulebook/R010@1.0.0"
+  },
+  {
+    "rule_id": "R011",
+    "title": "Service code in fictional catalogue",
+    "severity": "high",
+    "logic": "Each nonempty service_code must occur in rules/services.json. An unknown code fails; a missing code leaves UNABLE_TO_ASSESS. No real CPT/ICD coding decisions are implied.",
+    "corrective_action": "Verify the intended code against the supplied teaching catalogue.",
+    "version": "1.0.0",
+    "source": "fictional-rulebook/R011@1.0.0"
+  },
+  {
+    "rule_id": "R012",
+    "title": "Claim total equals line amounts",
+    "severity": "high",
+    "logic": "total_amount must equal the sum of the submitted line net_amount values, rounded to 2 decimals with ROUND_HALF_UP. Absolute difference <= 0.01 SAR passes. Missing amount inputs leave UNABLE_TO_ASSESS. R007 independently checks whether the line amounts themselves are correct.",
+    "corrective_action": "Reconcile the claim total with the submitted line amounts.",
+    "version": "1.0.0",
+    "source": "fictional-rulebook/R012@1.0.0"
+  },
+  {
+    "rule_id": "R013",
+    "title": "Quantity and price limits",
+    "severity": "medium",
+    "logic": "Every quantity must be a positive integer, unit_price must be greater than zero and at most policy.max_unit_price[service_code], and quantity must be at most policy.max_quantity_per_line[service_code]. Equality at the maximum passes. A known violation fails. Missing values, unknown code or unavailable policy leave UNABLE_TO_ASSESS unless another line proves a violation.",
+    "corrective_action": "Verify the billed quantity and price against the fictional limits.",
+    "version": "1.0.0",
+    "source": "fictional-rulebook/R013@1.0.0"
+  },
+  {
+    "rule_id": "R014",
+    "title": "Submission window",
+    "severity": "medium",
+    "logic": "submission_date minus the latest service_date must be <= policy.submission_window_days. Equality passes. Negative lag is NOT_APPLICABLE here and is handled by R002. Missing dates/policy leave UNABLE_TO_ASSESS.",
+    "corrective_action": "Review the submission dates and any exception with a human reviewer.",
+    "version": "1.0.0",
+    "source": "fictional-rulebook/R014@1.0.0"
+  },
+  {
+    "rule_id": "R015",
+    "title": "Currency matches policy",
+    "severity": "high",
+    "logic": "currency must equal policy.currency (SAR). A known different currency fails. Missing currency or unavailable policy leaves UNABLE_TO_ASSESS. No exchange-rate conversion is performed.",
+    "corrective_action": "Verify and correct the declared currency against the source bill.",
+    "version": "1.0.0",
+    "source": "fictional-rulebook/R015@1.0.0"
+  }
+]

@@ -1,0 +1,41 @@
+{
+  "type": "object",
+  "properties": {
+    "claim_id": {
+      "type": "string"
+    },
+    "rule_id": {
+      "type": "string"
+    },
+    "action": {
+      "enum": [
+        "confirm_issue",
+        "dismiss_with_reason",
+        "request_information",
+        "mark_corrected_for_recheck"
+      ]
+    },
+    "actor": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "original_status": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "claim_id",
+    "rule_id",
+    "action",
+    "actor",
+    "reason",
+    "created_at",
+    "original_status"
+  ],
+  "additionalProperties": false
+}

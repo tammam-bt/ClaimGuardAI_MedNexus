@@ -1,0 +1,14 @@
+[
+  {
+    "provider_id": "EDU-PROV-01",
+    "display": "Fictional Training Clinic 1"
+  },
+  {
+    "provider_id": "EDU-PROV-02",
+    "display": "Fictional Training Clinic 2"
+  },
+  {
+    "provider_id": "EDU-PROV-03",
+    "display": "Fictional Training Clinic 3"
+  }
+]

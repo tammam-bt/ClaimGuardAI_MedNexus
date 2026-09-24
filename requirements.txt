@@ -1,0 +1,2 @@
+# No third-party packages are required for the supplied baseline, scorer, CSV conversion or audit tools.
+# Python 3.10+ is the teaching target. Optional model/UI packages are the team's choice.

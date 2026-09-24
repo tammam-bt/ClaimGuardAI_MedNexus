@@ -1,0 +1,132 @@
+{
+  "type": "object",
+  "properties": {
+    "claim_id": {
+      "type": "string"
+    },
+    "rule_id": {
+      "enum": [
+        "R001",
+        "R002",
+        "R003",
+        "R004",
+        "R005",
+        "R006",
+        "R007",
+        "R008",
+        "R009",
+        "R010",
+        "R011",
+        "R012",
+        "R013",
+        "R014",
+        "R015"
+      ]
+    },
+    "rule_version": {
+      "const": "1.0.0"
+    },
+    "status": {
+      "enum": [
+        "PASS",
+        "FAIL",
+        "UNABLE_TO_ASSESS",
+        "NOT_APPLICABLE",
+        "NOT_IMPLEMENTED"
+      ]
+    },
+    "severity": {
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "affected_line_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "pattern": "^/"
+          },
+          "value": {}
+        },
+        "required": [
+          "path",
+          "value"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "rule_source": {
+      "type": "string"
+    },
+    "explanation": {
+      "type": "string",
+      "minLength": 1
+    },
+    "corrective_action": {
+      "type": "string"
+    },
+    "confidence": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "confidence_kind": {
+      "enum": [
+        "not_probabilistic",
+        "uncalibrated",
+        "calibrated"
+      ]
+    },
+    "requires_human_review": {
+      "type": "boolean"
+    },
+    "method": {
+      "enum": [
+        "deterministic",
+        "hybrid",
+        "llm"
+      ]
+    },
+    "review_status": {
+      "enum": [
+        "unreviewed",
+        "reviewed"
+      ]
+    }
+  },
+  "required": [
+    "claim_id",
+    "rule_id",
+    "rule_version",
+    "status",
+    "severity",
+    "affected_line_ids",
+    "evidence",
+    "rule_source",
+    "explanation",
+    "corrective_action",
+    "confidence",
+    "confidence_kind",
+    "requires_human_review",
+    "method",
+    "review_status"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "One claim-rule result v1.0.0"
+}

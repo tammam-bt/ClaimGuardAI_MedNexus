@@ -1,0 +1,321 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ClaimGuard AI | Start here</title><style>body{margin:0;font:16px/1.65 system-ui;color:#21364a;background:#f2f6f8}header{margin-left:280px;padding:44px;background:#102f47;color:white}header h1{font-size:42px;margin:8px 0}header span{color:#80ddd4}nav{position:fixed;inset:0 auto 0 0;width:238px;padding:20px;background:white;overflow:auto;border-right:1px solid #dce5ec}nav h2{font-size:18px}nav a{display:block;font-size:13px;line-height:1.5;padding:8px 0;text-decoration:none;color:#006f69}main{margin-left:280px;max-width:930px;padding:35px 44px}h2{color:#102f47;margin-top:36px}h3{color:#007d78}section{border-top:2px solid #dce5ec;padding-top:25px;margin-top:35px;scroll-margin-top:15px}table{width:100%;border-collapse:collapse;font-size:14px;margin:20px 0;background:white}td,th{padding:10px;text-align:left;vertical-align:top;border-bottom:1px solid #dce5ec}th{background:#102f47;color:white}pre{background:#102f47;color:#eaf5ff;padding:18px;border-radius:6px;overflow:auto;line-height:1.6;font-size:13px}code{font-size:.86em}.bullet{padding-left:15px}a{color:#007d78}@media(max-width:800px){nav{position:static;width:auto}header,main{margin:0;padding:24px}table{font-size:12px}}</style><nav><h2>Read and build</h2><a href="examples/review_demo.html">Open review demo</a><a href="ClaimGuardAI_Student_Handbook.pdf">Open PDF handbook</a><a href="#doc0">01 | Challenge brief</a><a href="#doc1">02 | Healthcare claims in plain language</a><a href="#doc2">03 | Data dictionary and file contracts</a><a href="#doc3">04 | Fictional payer rulebook</a><a href="#doc4">05 | Architecture and bounded AI</a><a href="#doc5">06 | Setup and first run</a><a href="#doc6">07 | Evaluation and acceptance</a><a href="#doc7">08 | Kickoff workshop and practical labs</a><a href="#doc8">09 | Work plan and submission templates</a><a href="#doc9">10 | Privacy, security and audit design</a><a href="#doc10">11 | FHIR R4 mapping guide</a><a href="#doc11">12 | Troubleshooting and common mistakes</a><a href="#doc12">13 | Worked examples</a><a href="#doc13">14 | Sources, provenance and release notes</a><a href="#doc14">15 | Initial team backlog</a></nav><header><span>CSTAM / VELODOC</span><h1>ClaimGuard AI</h1><p>Student starter pack · 600 synthetic claims · 15 fictional rules</p></header><main><h2>ClaimGuard AI | Student starter pack</h2>
+<p><strong>Start here.</strong> Build a trustworthy copilot that pre-validates synthetic healthcare claims and supports human review.</p>
+<p>Version 1.0.0 | CSTAM-VELODOC | Mentor: Dr. Wael Hilali</p>
+<h3>Your first 30 minutes</h3>
+<p>1. Read docs/01_Challenge_Brief.md and docs/02_Claims_Primer.md.</p>
+<p>2. Open examples/review_demo.html in a browser to see the review workflow.</p>
+<p>3. Read one case in docs/13_Worked_Examples.md and its full input in examples/worked_cases.json.</p>
+<p>4. Follow docs/06_Setup_and_First_Run.md. No paid account or extra Python packages are needed.</p>
+<p>5. Agree team roles and the first three tasks with your mentor.</p>
+<h3>What is included</h3>
+<p class="bullet">• 600 unique public claims: 400 development, 150 validation, 50 stress.</p>
+<p class="bullet">• Normalized JSONL, relational CSV and educational FHIR R4-style projections.</p>
+<p class="bullet">• 15 fictional payer rules, two policy profiles, six service codes, public expected results.</p>
+<p class="bullet">• Ten worked examples and 25 bounded-AI explanation exercises.</p>
+<p class="bullet">• A runnable three-rule baseline, strict evaluator, CSV converter, local review page and audit prototype.</p>
+<p class="bullet">• Input/output schemas, prompt template, model-neutral mock adapter, tests and validation checks.</p>
+<p class="bullet">• Full handbook, workshop labs, roadmap, editable reporting templates and security guidance.</p>
+<h3>Quick run (from this folder)</h3>
+<pre><code>python src/validate_pack.py
+python -m unittest discover -s tests -v
+python src/run_baseline.py --input data/development/claims.jsonl --output outputs/dev_predictions.jsonl
+python src/evaluate.py --gold data/development/expected_results.jsonl --pred outputs/dev_predictions.jsonl --claims data/development/claims.jsonl --output outputs/dev_metrics.json
+python src/make_review.py --input outputs/dev_predictions.jsonl --output outputs/review.html</code></pre>
+<p>Open outputs/review.html. On Windows use py, or on macOS/Linux python3, if python is unavailable. See docs/06 for details.</p>
+<h3>Read in this order</h3>
+<p>01 brief; 02 domain; 03 data contract; 04 rulebook; 06 setup; 13 examples; 05 architecture/AI; 07 evaluation; 08 workshop; 09 work plan; 10 security; 11 FHIR; 12 troubleshooting; 14 sources.</p>
+<h3>Scope and honesty</h3>
+<p>All records and policies are synthetic. The baseline covers only R001/R003/R006; other checks are explicitly NOT_IMPLEMENTED. The mock adapter is not an LLM. The local hash chain is tamper-evident, not immutable storage. FHIR examples are educational mappings without full HL7/profile validation. Passing these fictional rules is not payer approval or evidence of production readiness.</p>
+<p>Ask the mentor for model access before the AI milestone. Never place credentials or real patient records in this repository. Follow organizer instructions if they differ from suggested schedules or grading weights here.</p><section id="doc0"><h2>01 | Challenge brief</h2>
+<p><strong>ClaimGuard AI: Trustworthy Agentic Copilot for Healthcare Claim Pre-Validation</strong></p>
+<p>Challenge reference: CSTAM-VELODOC. Context: CSTAM 3.0. Mentor: Dr. Wael Hilali, CTO &amp; Co-Founder, Velodoc / Amazit. Pack version: 1.0.0, 17 September 2026.</p>
+<h3>Your mission</h3>
+<p>Build a usable copilot for a claims officer who checks a claim before submission. The officer needs to see what is wrong, which evidence supports the finding, what to review or correct, and which questions remain unresolved. The officer must be able to record a decision without overwriting the original evidence.</p>
+<p>The supplied baseline implements three checks. Your work is to implement the remaining rules, add bounded AI assistance, design human review, measure the results and explain the limitations. This is a student challenge package prepared from the previously agreed scope; the suggested schedule and grading weights in this pack are mentor proposals, not an official organizer timetable.</p>
+<h3>Required MVP behaviour</h3>
+<p>1. Ingest the normalized JSONL teaching data; CSV import is supplied. Demonstrate one FHIR mapping example.</p>
+<p>2. Evaluate all 15 documented fictional rules, including uncertainty and not-applicable outcomes.</p>
+<p>3. Report Claim ID, Rule ID/version, severity, affected lines, evidence, explanation and corrective action.</p>
+<p>4. Show a review queue with filters, original values and clear unresolved-check counts.</p>
+<p>5. Support confirm, dismiss with reason, request information, and corrected-for-recheck decisions.</p>
+<p>6. Add one bounded AI capability, such as a plain-language explanation or a reviewer handover grounded in validated findings. Show tool boundaries, schema checks and a safe fallback. Do not relabel deterministic failures through an LLM.</p>
+<p>7. Record checks and human actions with source/rule/model versions. Demonstrate a tamper-evident audit prototype and explain the additional storage/access controls needed for immutable production logging.</p>
+<p>8. Evaluate on the provided data, then on a mentor-held set. Report false alarms, missed issues and uncertainty handling separately.</p>
+<h3>Scope boundaries</h3>
+<p>Use synthetic records and fictional policy information only. No clinical diagnosis, medical-necessity judgment, fraud accusation, automatic claim approval, live payer submission or EHR integration is required. Services and diagnoses use invented educational codes. The pack is not a real reimbursement decision system.</p>
+<h3>Submission checklist</h3>
+<p class="bullet">• Reproducible repository with README, dependencies, configuration example and launch commands.</p>
+<p class="bullet">• Architecture and data-flow diagram with trust boundaries and tool permissions.</p>
+<p class="bullet">• Working review interface, recorded demo and concise pitch presentation.</p>
+<p class="bullet">• Technical report covering implementation, decisions, tests and limitations.</p>
+<p class="bullet">• Evaluation report with dataset split, rule metrics, false positives/negatives and AI ablations.</p>
+<p class="bullet">• Privacy/security note and auditable sample run. Keep secrets out of the repository.</p>
+<p class="bullet">• A contribution log explaining team roles and the use of AI coding tools.</p>
+<p>Success means a reviewer can understand and verify the findings, and the team can show where the system succeeds or abstains. Visual polish alone is insufficient.</p></section><section id="doc1"><h2>02 | Healthcare claims in plain language</h2>
+<p>A claim is a provider&#x27;s request for payment for services supplied to a patient. The payer evaluates it against the relevant contract and submission requirements. ClaimGuard works before submission and highlights administrative issues that a person can verify.</p>
+<h3>The participants</h3>
+<table><tr><th>Term</th><th>Meaning in this challenge</th></tr><tr><td>Patient</td><td>Synthetic person receiving a service, identified by patient_id.</td></tr><tr><td>Member</td><td>Insurance membership identifier recorded on both the claim and coverage.</td></tr><tr><td>Provider</td><td>Fictional clinic that supplies the service and prepares the claim.</td></tr><tr><td>Payer</td><td>The fictional EDU-PAYER insurance organization.</td></tr><tr><td>Coverage</td><td>Supplied record of membership, active status and date boundaries.</td></tr><tr><td>Policy</td><td>Versioned fictional requirements and limits in rules/policies.json.</td></tr><tr><td>Claim line</td><td>One billed service with date, quantity, unit price and amount.</td></tr><tr><td>Prior authorization</td><td>A supplied fictional approval reference with service, dates and quantity limits.</td></tr><tr><td>Supporting document</td><td>Synthetic record supporting the billed service; administrative completeness only.</td></tr></table>
+<h3>Walk through the workflow</h3>
+<p>Care is documented; a claim is assembled; ClaimGuard checks it; a claims officer reviews findings and requests corrections; the revised claim is checked again. A real payer&#x27;s later decision is outside this exercise. Do not label a passed pre-check as an approved payment.</p>
+<p>Example: an imaging service can have a correct total but lack an authorization reference. R008 should flag the missing reference. R009 cannot verify an absent authorization and should say unable to assess. Both results are useful and neither proves that the service was unnecessary.</p>
+<h3>Questions to ask when reading a case</h3>
+<p class="bullet">• Which person, membership and provider does this record describe?</p>
+<p class="bullet">• What was billed, on which date, and for what amount?</p>
+<p class="bullet">• Which policy applies, and what evidence was supplied?</p>
+<p class="bullet">• Is an input explicitly missing, inconsistent, unknown, or simply not applicable?</p>
+<p class="bullet">• Can I point to the exact field or document supporting the finding?</p>
+<p>An authorization reference alone is not proof of a valid authorization. A document title alone is not proof that it belongs to this patient and service. Repeated service lines can be legitimate; the duplicate rule creates a review task and never alleges fraud.</p></section><section id="doc2"><h2>03 | Data dictionary and file contracts</h2>
+<h3>Formats and splits</h3>
+<p>Normalized JSONL is authoritative: one complete claim envelope per line. Every envelope contains its coverage, service lines, authorization records and attachment inventory. A JSONL file is not a single JSON array. All records are synthetic.</p>
+<table><tr><th>Split</th><th>Claims</th><th>Use</th><th>Labels</th></tr><tr><td>development</td><td>400</td><td>Coding, learning and debugging</td><td>Public</td></tr><tr><td>validation</td><td>150</td><td>Freeze a version, evaluate, inspect errors</td><td>Public</td></tr><tr><td>stress</td><td>50</td><td>Boundaries, uncertain inputs and untrusted text</td><td>Public</td></tr></table>
+<p>The mentor holds 200 additional claims separately. All four splits use distinct patient, claim, invoice and authorization IDs. Similar rule patterns across splits are intentional; this tests implementation, not generalization to real healthcare populations. The generated distribution is not a real denial rate.</p>
+<h3>Top-level fields</h3>
+<table><tr><th>Field</th><th>Type</th><th>Meaning</th></tr><tr><td>schema_version</td><td>string</td><td>Teaching contract version 1.0.0.</td></tr><tr><td>claim_id</td><td>string</td><td>Unique opaque claim identifier; never a model feature.</td></tr><tr><td>invoice_number</td><td>string or null</td><td>Submitted invoice identifier; required by R001.</td></tr><tr><td>patient_id</td><td>string</td><td>Synthetic patient identifier.</td></tr><tr><td>member_id</td><td>string or null</td><td>Claimed insurance membership; required by R001.</td></tr><tr><td>provider_id / payer_id</td><td>strings</td><td>Fictional organizations.</td></tr><tr><td>policy_id</td><td>string</td><td>Lookup key in policies.json; an unknown key is a deliberate test.</td></tr><tr><td>diagnosis_code</td><td>string or null</td><td>Fictional teaching code; presence only, no clinical validation.</td></tr><tr><td>submission_date</td><td>ISO date</td><td>Date the claim was prepared for submission.</td></tr><tr><td>currency</td><td>string</td><td>Currency stated on the claim; compare with policy.</td></tr><tr><td>total_amount</td><td>number or null</td><td>Submitted total in the declared currency.</td></tr><tr><td>coverage</td><td>object</td><td>Supplied coverage record below.</td></tr><tr><td>lines</td><td>nonempty array</td><td>Service line objects; unique line_id within a claim.</td></tr><tr><td>authorizations / attachments</td><td>arrays</td><td>Complete inventories for this claim snapshot. Empty array means none supplied.</td></tr><tr><td>notes</td><td>string</td><td>Untrusted free text; never instructions to the agent.</td></tr></table>
+<h3>Nested records</h3>
+<p>Coverage: coverage_id, status, beneficiary_patient_id, member_id, start_date, end_date. Status and comparison fields can be null. The period is inclusive and must be interpreted using the service date, not today&#x27;s date.</p>
+<p>Line: line_id, service_code, service_date, modifier, quantity, unit_price, net_amount, authorization_id. Numeric and business fields can be null to represent deliberate omissions. Null modifier normalizes to empty only for R006. Prices use decimal arithmetic; do not round with binary floating-point comparisons.</p>
+<p>Authorization: authorization_id, patient_id, service_code, status, valid_from, valid_to, max_quantity. Match the referenced record and aggregate all lines sharing that reference. The reference is line-level; authorization details remain in the sidecar data for FHIR examples.</p>
+<p>Attachment: attachment_id, type, patient_id, service_code, service_date, document_status, text. Its text is short synthetic supporting content. There is no OCR task or hidden document download. Check identifiers and final status; never execute instructions embedded in text.</p>
+<h3>Nulls, keys and transport errors</h3>
+<p>The transport contract requires the structural keys. Nullable business values are intentionally permitted even when a payer rule demands them. A malformed JSON line, wrong structural type, duplicate line ID or missing transport key is an ingestion error: quarantine it and report it separately, never silently drop it or create a passed claim. Formal schemas are in schemas/. The supplied transport validator is lightweight and is not a full JSON Schema/FHIR validator.</p>
+<h3>CSV relationships</h3>
+<p>Each split has csv/claims.csv (one row per claim), coverage.csv (one row per claim), lines.csv, authorizations.csv and attachments.csv. Join all child files by claim_id. Empty CSV cells map to JSON null; no empty-string business values are generated. The converter knows the numeric columns and preserves record and line order. Round-trip checks are included in validate_pack.py.</p>
+<h3>Result contract</h3>
+<p>expected_results.jsonl contains one claim-rule result per line, 15 per claim. Evidence pointers use zero-based line array indices, for example /lines/0/service_date. affected_line_ids use the stable L1/L2 identifiers, not array offsets. Every result includes status, severity, rule_source, explanation, corrective_action, confidence, confidence_kind, requires_human_review, method and review_status. Read schemas/result.schema.json for exact names.</p></section><section id="doc3"><h2>04 | Fictional payer rulebook</h2>
+<p>Version 1.0.0 | Effective for this teaching benchmark only</p>
+<p>All rules, prices, codes, networks and windows below are invented for CSTAM-VELODOC. They do not represent any real insurer, NPHIES requirement or medical coding standard. Use rules/rules.json and rules/policies.json as the machine-readable counterparts.</p>
+<h3>Shared evaluation conventions</h3>
+<p class="bullet">• Produce exactly one result per claim and rule: 15 records per claim. Aggregate all relevant line issues into that record.</p>
+<p class="bullet">• Precedence within a rule: a proven violation gives FAIL; otherwise missing necessary evidence gives UNABLE_TO_ASSESS; otherwise use PASS or NOT_APPLICABLE. Preserve uncertainty in the explanation even when a different line proves a failure.</p>
+<p class="bullet">• A missing required field is an observed defect under R001. Dependent rules cannot invent that value and may return UNABLE_TO_ASSESS. Multiple findings are intentional and are not mutually exclusive.</p>
+<p class="bullet">• Empty authorizations or attachments arrays are known empty inventories for this snapshot. A null comparison value means unknown. An unrecognized policy_id means no matching policy was supplied, not proof of non-coverage.</p>
+<p class="bullet">• Compare ISO dates at day precision. Boundaries are inclusive. Use decimal arithmetic and ROUND_HALF_UP; 0.01 SAR tolerance is inclusive.</p>
+<p class="bullet">• Exact identifiers are case-sensitive. Do not silently trim or repair source data before checking. The supplied datasets contain nulls for missing values.</p>
+<p class="bullet">• Evidence is a JSON pointer into the original normalized claim plus the exact observed value. Reference the fictional rule version separately. Never use a label file as evidence.</p>
+<p class="bullet">• PASS means this specific check passed on the supplied data. It does not mean payer approval or a clinically correct claim. NOT_IMPLEMENTED must never be shown as PASS.</p>
+<p class="bullet">• Deterministic checks use confidence=null and confidence_kind=not_probabilistic. An LLM&#x27;s self-reported score is not calibrated confidence.</p>
+<h3>Policy profiles</h3>
+<table><tr><th>Parameter</th><th>EDU-BASIC</th><th>EDU-PLUS</th></tr><tr><td>Submission window from latest service</td><td>30 days</td><td>60 days</td></tr><tr><td>Currency</td><td>SAR</td><td>SAR</td></tr><tr><td>Network</td><td>EDU-PROV-01, EDU-PROV-02, EDU-PROV-03</td><td>Same</td></tr><tr><td>Authorization required</td><td>SVC-IMAGE, SVC-THERAPY</td><td>Same</td></tr><tr><td>Documents required</td><td>SVC-IMAGE: imaging-report; SVC-DENTAL: service-note</td><td>Same</td></tr></table>
+<p>All other limits are identical between profiles and are listed below. No tax, copayment, deductible, benefit balance or real coding rule is modeled.</p>
+<table><tr><th>Service</th><th>Description</th><th>Maximum unit price (SAR)</th><th>Maximum quantity per line</th></tr><tr><td>SVC-CONSULT</td><td>Synthetic outpatient consultation</td><td>350</td><td>1</td></tr><tr><td>SVC-LAB</td><td>Synthetic laboratory panel</td><td>260</td><td>3</td></tr><tr><td>SVC-IMAGE</td><td>Synthetic imaging service</td><td>2200</td><td>1</td></tr><tr><td>SVC-THERAPY</td><td>Synthetic therapy session</td><td>450</td><td>4</td></tr><tr><td>SVC-DENTAL</td><td>Synthetic dental service</td><td>800</td><td>2</td></tr><tr><td>SVC-PHARM</td><td>Synthetic pharmacy item</td><td>200</td><td>10</td></tr></table>
+<h3>R001 | Required claim information</h3>
+<p>Severity: <strong>high</strong>. Source: <code>fictional-rulebook/R001@1.0.0</code>.</p>
+<p>invoice_number, member_id, diagnosis_code and every line service_date, service_code, quantity, unit_price, net_amount must be present and non-null; strings must not be empty. A known absence is FAIL, not UNABLE_TO_ASSESS. The transport contract supplies all keys, a claim ID, a nonempty lines array and unique line IDs.</p>
+<p>Human action: Request the missing source information; never invent identifiers or diagnosis codes.</p>
+<h3>R002 | Service and submission chronology</h3>
+<p>Severity: <strong>high</strong>. Source: <code>fictional-rulebook/R002@1.0.0</code>.</p>
+<p>Every service_date must be on or before submission_date. Equality passes. Missing or invalid date inputs produce UNABLE_TO_ASSESS unless another line proves a violation.</p>
+<p>Human action: Verify and correct dates against the original record.</p>
+<h3>R003 | Coverage active on service date</h3>
+<p>Severity: <strong>high</strong>. Source: <code>fictional-rulebook/R003@1.0.0</code>.</p>
+<p>coverage.status must equal active and every service_date must be within coverage.start_date and coverage.end_date, both inclusive. A known non-active status or out-of-period date is FAIL. Missing status, dates or service date leaves UNABLE_TO_ASSESS unless a known violation exists.</p>
+<p>Human action: Verify coverage applicable on the service date with the source records.</p>
+<h3>R004 | Member and beneficiary consistency</h3>
+<p>Severity: <strong>high</strong>. Source: <code>fictional-rulebook/R004@1.0.0</code>.</p>
+<p>patient_id must equal coverage.beneficiary_patient_id and member_id must equal coverage.member_id, as exact case-sensitive identifiers. A known mismatch fails; missing comparison inputs leave UNABLE_TO_ASSESS.</p>
+<p>Human action: Resolve the patient/member mismatch using the authoritative records.</p>
+<h3>R005 | Provider in the supplied network</h3>
+<p>Severity: <strong>high</strong>. Source: <code>fictional-rulebook/R005@1.0.0</code>.</p>
+<p>provider_id must be listed in policy.allowed_providers. An explicit unlisted provider fails. A missing provider or unavailable policy is UNABLE_TO_ASSESS. The supplied list is complete for this fictional challenge.</p>
+<p>Human action: Verify provider identity and the applicable fictional network list.</p>
+<h3>R006 | Possible duplicate service lines</h3>
+<p>Severity: <strong>medium</strong>. Source: <code>fictional-rulebook/R006@1.0.0</code>.</p>
+<p>Flag repeated (service_code, service_date, modifier) within one claim. Normalize null modifier to an empty string. Different modifiers or dates are not duplicates under this rule. Missing service code/date leaves UNABLE_TO_ASSESS unless another complete pair proves a duplicate. FAIL means a possible duplicate for human review, not fraud.</p>
+<p>Human action: Ask the reviewer whether repeated lines represent separate documented services.</p>
+<h3>R007 | Line arithmetic</h3>
+<p>Severity: <strong>high</strong>. Source: <code>fictional-rulebook/R007@1.0.0</code>.</p>
+<p>For each line, net_amount must equal quantity multiplied by unit_price, rounded to 2 decimal places using decimal ROUND_HALF_UP. A difference of at most 0.01 SAR passes. Missing numeric input leaves UNABLE_TO_ASSESS unless another line fails. Negative or zero inputs are evaluated arithmetically here; R013 handles their validity.</p>
+<p>Human action: Check quantity, unit price and line amount; preserve the original values in the audit record.</p>
+<h3>R008 | Required authorization reference</h3>
+<p>Severity: <strong>high</strong>. Source: <code>fictional-rulebook/R008@1.0.0</code>.</p>
+<p>For each service in policy.auth_required_services, its line authorization_id must be nonempty. A known empty reference fails. No required service means NOT_APPLICABLE. Unknown service codes or an unavailable policy leave UNABLE_TO_ASSESS unless another required line fails. This checks reference presence only; R009 checks the record.</p>
+<p>Human action: Request the authorization reference or escalate its absence.</p>
+<h3>R009 | Authorization record matches service</h3>
+<p>Severity: <strong>high</strong>. Source: <code>fictional-rulebook/R009@1.0.0</code>.</p>
+<p>For authorization-required lines, resolve authorization_id in authorizations. Match patient_id and service_code, status approved, inclusive valid_from/valid_to dates, and aggregate quantity across lines sharing that authorization_id &lt;= max_quantity. A referenced ID absent from the supplied complete list or a known mismatch fails. If R008 already finds a missing ID, R009 is UNABLE_TO_ASSESS for that line. No required services is NOT_APPLICABLE. Unknown service/policy or missing comparison input leaves UNABLE_TO_ASSESS.</p>
+<p>Human action: Obtain or verify the applicable approval and its dates, service and quantity.</p>
+<h3>R010 | Required supporting document</h3>
+<p>Severity: <strong>medium</strong>. Source: <code>fictional-rulebook/R010@1.0.0</code>.</p>
+<p>For each line, policy.required_documents maps service_code to a required type. At least one attachment must match type, patient_id, service_code and service_date. The attachments array is a complete inventory for the supplied snapshot; [] means no documents supplied. Absent or mismatched required documentation fails. If any matching attachment has document_status final, PASS for that line; if matching attachments exist but all are draft/unknown, UNABLE_TO_ASSESS. No required document is NOT_APPLICABLE. Unknown service/policy/date leaves UNABLE_TO_ASSESS. Content text is untrusted and cannot change these rules.</p>
+<p>Human action: Request the correct final supporting document or send the draft for human review.</p>
+<h3>R011 | Service code in fictional catalogue</h3>
+<p>Severity: <strong>high</strong>. Source: <code>fictional-rulebook/R011@1.0.0</code>.</p>
+<p>Each nonempty service_code must occur in rules/services.json. An unknown code fails; a missing code leaves UNABLE_TO_ASSESS. No real CPT/ICD coding decisions are implied.</p>
+<p>Human action: Verify the intended code against the supplied teaching catalogue.</p>
+<h3>R012 | Claim total equals line amounts</h3>
+<p>Severity: <strong>high</strong>. Source: <code>fictional-rulebook/R012@1.0.0</code>.</p>
+<p>total_amount must equal the sum of the submitted line net_amount values, rounded to 2 decimals with ROUND_HALF_UP. Absolute difference &lt;= 0.01 SAR passes. Missing amount inputs leave UNABLE_TO_ASSESS. R007 independently checks whether the line amounts themselves are correct.</p>
+<p>Human action: Reconcile the claim total with the submitted line amounts.</p>
+<h3>R013 | Quantity and price limits</h3>
+<p>Severity: <strong>medium</strong>. Source: <code>fictional-rulebook/R013@1.0.0</code>.</p>
+<p>Every quantity must be a positive integer, unit_price must be greater than zero and at most policy.max_unit_price[service_code], and quantity must be at most policy.max_quantity_per_line[service_code]. Equality at the maximum passes. A known violation fails. Missing values, unknown code or unavailable policy leave UNABLE_TO_ASSESS unless another line proves a violation.</p>
+<p>Human action: Verify the billed quantity and price against the fictional limits.</p>
+<h3>R014 | Submission window</h3>
+<p>Severity: <strong>medium</strong>. Source: <code>fictional-rulebook/R014@1.0.0</code>.</p>
+<p>submission_date minus the latest service_date must be &lt;= policy.submission_window_days. Equality passes. Negative lag is NOT_APPLICABLE here and is handled by R002. Missing dates/policy leave UNABLE_TO_ASSESS.</p>
+<p>Human action: Review the submission dates and any exception with a human reviewer.</p>
+<h3>R015 | Currency matches policy</h3>
+<p>Severity: <strong>high</strong>. Source: <code>fictional-rulebook/R015@1.0.0</code>.</p>
+<p>currency must equal policy.currency (SAR). A known different currency fails. Missing currency or unavailable policy leaves UNABLE_TO_ASSESS. No exchange-rate conversion is performed.</p>
+<p>Human action: Verify and correct the declared currency against the source bill.</p></section><section id="doc4"><h2>05 | Architecture and bounded AI</h2>
+<h3>Suggested component responsibilities</h3>
+<table><tr><th>Component</th><th>Inputs</th><th>Outputs and boundary</th></tr><tr><td>Ingestion</td><td>JSONL or CSV</td><td>Validated envelope or explicit ingestion error; preserve original bytes/hash.</td></tr><tr><td>Policy resolver</td><td>policy_id, version</td><td>Supplied matching policy; no invented fallback policy.</td></tr><tr><td>Rule engine</td><td>Envelope and policy</td><td>15 structured results, including unknown and not applicable.</td></tr><tr><td>Evidence layer</td><td>Original envelope, result paths</td><td>Exact evidence values and rule references.</td></tr><tr><td>AI explanation helper</td><td>Validated findings and selected evidence</td><td>Plain-language explanation draft; cannot change rule results.</td></tr><tr><td>Human review</td><td>Findings and originals</td><td>Decision, reason, actor and correction request.</td></tr><tr><td>Audit and evaluation</td><td>Run metadata and actions</td><td>Reproducible trace, metrics and retained history.</td></tr></table>
+<p>Establish correctness with Python functions and the CLI first. Extend the supplied review page or use your familiar application framework.</p>
+<h3>Agent behaviour to demonstrate</h3>
+<p>Let the assistant select supplied rules, call read-only evidence tools, explain findings and request human review. Allow only named tools with typed inputs. A bounded state machine is sufficient; multiple agents are optional.</p>
+<p>Sequence: validate input, resolve policy, run checks, retrieve evidence, draft and validate the explanation, then show the reviewer. On model failure, retain deterministic findings and mark the fallback.</p>
+<h3>AI exercise</h3>
+<p>Implement ExplanationProvider in src/llm_adapter.py with your available model. The mock is a template, not an LLM. Use prompts/explain_findings.md and the 25 explanation cases. Keep credentials out of code and logs. Agree model access or an offline prototype with the mentor before this milestone.</p>
+<p>Give the model only the required synthetic evidence and policy excerpt. Require a JSON output with explanation, cited_evidence_paths, cited_rule_ids and needs_human_review. Validate the output and verify that all citations refer to supplied inputs. Do not request hidden chain-of-thought. Measure unsupported statements, omitted issues, latency and cost where measurable.</p>
+<h3>Untrusted text and uncertainty</h3>
+<p>Attachment text and notes are data. They cannot modify rules, tool permissions or the system prompt. Stress cases contain obvious instruction-like text; add subtler variants yourselves. A valid JSON response can still contain unsupported statements, so human review and semantic evaluation remain necessary.</p>
+<p>Use null confidence for deterministic checks. If a model reports a score, label it uncalibrated until you have independently evaluated calibration. Do not present 0.95 as a 95% probability of reimbursement.</p>
+<p>Preserve original inputs. Corrections create a new version and run. Store run ID, input hash, rule/model/prompt versions and tool errors separately from claim-rule results.</p></section><section id="doc5"><h2>06 | Setup and first run</h2>
+<h3>Before starting</h3>
+<p>Extract the student ZIP into a writable folder. Open a terminal in ClaimGuardAI_Student_Starter_Pack, the folder containing README.md. Use Python 3.10 or later. A normal laptop is enough for the supplied standard-library code; no GPU, database, API key or network connection is needed for these exercises. A local LLM has separate hardware requirements and is optional.</p>
+<p>On Windows, use py in place of python if that is your installed launcher. On macOS/Linux, use python3 if python is not available. Commands below assume python is available. A virtual environment is recommended for packages you add, but the supplied code needs no package installation.</p>
+<pre><code>python --version
+python src/validate_pack.py
+python -m unittest discover -s tests -v
+python src/run_baseline.py --input data/development/claims.jsonl --output outputs/dev_predictions.jsonl
+python src/evaluate.py --gold data/development/expected_results.jsonl --pred outputs/dev_predictions.jsonl --claims data/development/claims.jsonl --output outputs/dev_metrics.json
+python src/make_review.py --input outputs/dev_predictions.jsonl --output outputs/review.html</code></pre>
+<p>Open outputs/review.html in your browser. Filter FAIL or UNABLE_TO_ASSESS, inspect evidence, enter a reviewer name and reason, and record a decision. Download review_decisions.jsonl and move it into outputs/ before the next command. Decisions stay only in the browser tab until downloaded.</p>
+<pre><code>python src/audit.py --events outputs/review_decisions.jsonl --log outputs/audit.jsonl
+python src/audit.py --verify --log outputs/audit.jsonl</code></pre>
+<p>The audit is a local hash-chain demonstration. Anyone who controls the file can rewrite the chain or remove events; externally anchor the head and use restricted append-only/WORM storage for a stronger design. The starter does not implement production immutability, authentication or concurrent writes.</p>
+<h3>Optional CSV exercise</h3>
+<pre><code>python src/csv_to_jsonl.py --folder data/development/csv --output outputs/from_csv.jsonl</code></pre>
+<p>The rebuilt records should equal the authoritative JSONL, including nulls and child arrays. validate_pack.py checks this for all public splits.</p>
+<h3>What to expect</h3>
+<p>The baseline implements R001, R003 and R006. It returns NOT_IMPLEMENTED for the other 12 rules, so its overall score is intentionally incomplete. Do not replace those statuses with PASS. Implement your next rule in engine_core.py, add tests and rerun evaluation. Human explanation quality is not determined by the numerical score.</p>
+<h3>First success checkpoint</h3>
+<p>You can load a claim, explain its fields, run the baseline, locate a flagged field in the source, record a review decision and reproduce your results. Save a screenshot and a short team note explaining one correct finding and one limitation.</p></section><section id="doc6"><h2>07 | Evaluation and acceptance</h2>
+<h3>Evaluation protocol</h3>
+<p>Develop on the 400 development claims. Freeze a commit before the first validation run. Use the 150 validation claims to assess gaps; once their labels influence development, disclose that the set has become development feedback. The 50 stress cases test robustness and are not a representative prevalence sample. The mentor should keep the 200 held-out inputs and labels private until assessment.</p>
+<p>The scorer requires every claim-rule pair exactly once. Missing pairs, extra pairs, duplicate outputs, invalid statuses and mismatched evidence values are rejected. NOT_IMPLEMENTED is a visible incomplete result and counts against accuracy. An empty predictor cannot achieve a passing assessment by omitting claims.</p>
+<h3>Metrics</h3>
+<table><tr><th>Metric</th><th>Definition / interpretation</th></tr><tr><td>Issue precision</td><td>True predicted FAIL pairs / all predicted FAIL pairs.</td></tr><tr><td>Issue recall</td><td>True predicted FAIL pairs / all expected FAIL pairs.</td></tr><tr><td>Issue F1</td><td>Harmonic balance of issue precision and recall.</td></tr><tr><td>False-alarm rate</td><td>Predicted FAIL among pairs whose expected status is not FAIL.</td></tr><tr><td>Status accuracy</td><td>Exact agreement across PASS, FAIL, UNABLE_TO_ASSESS and NOT_APPLICABLE.</td></tr><tr><td>False abstentions</td><td>Predicted unable-to-assess when expected status is something else.</td></tr><tr><td>Missed abstentions</td><td>Expected unable-to-assess but predicted a different status.</td></tr><tr><td>Claim exact match</td><td>All 15 rule statuses correct for a claim.</td></tr></table>
+<p>Undefined precision/recall is reported as null, not 100%. All metrics are at claim-rule level unless explicitly labeled otherwise. Examine per-rule results and confusion counts; overall accuracy can hide rare failures. Evidence-value checks do not prove that the chosen field is relevant to a conclusion.</p>
+<h3>Proposed mentor assessment weights</h3>
+<table><tr><th>Area</th><th>Weight</th><th>Evidence to inspect</th></tr><tr><td>Rule correctness</td><td>35</td><td>Per-rule results; date, amount and authorization edge cases.</td></tr><tr><td>Grounded AI explanations</td><td>20</td><td>25 supplied exercise cases plus fresh variants; no unsupported approvals.</td></tr><tr><td>Human review and usability</td><td>15</td><td>Reviewer can trace, dismiss with reason, request info and trigger recheck.</td></tr><tr><td>Uncertainty and security</td><td>15</td><td>Unknown data, malicious document text, tool errors and access boundaries.</td></tr><tr><td>Audit and reproducibility</td><td>10</td><td>Trace hashes/versions, audit history, repeatable installation.</td></tr><tr><td>Communication</td><td>5</td><td>Concise architecture, limitations and demonstration.</td></tr></table>
+<p>These weights are proposals for this pack, not official CSTAM criteria. Agree any numerical pass thresholds at kickoff. For a fully implemented deterministic engine, exact status agreement on the supplied fictional rules is an appropriate development goal; high synthetic accuracy is not evidence of production readiness.</p>
+<h3>Non-negotiable demonstration checks</h3>
+<p class="bullet">• No unimplemented or unknown check is represented as a pass.</p>
+<p class="bullet">• Each flagged issue links to source evidence and the applicable fictional rule.</p>
+<p class="bullet">• A model failure cannot remove a deterministic finding.</p>
+<p class="bullet">• The original input is preserved and a correction is rechecked as a new version.</p>
+<p class="bullet">• No real patient information, exposed credential or live payer submission appears in the demo.</p>
+<h3>AI evaluation</h3>
+<p>Run the baseline with template explanations, then your model-assisted version on the same cases. Manually score each explanation 0/1 for correct finding, correct evidence, correct rule, appropriate action and honest uncertainty. Record unsupported facts separately. Include model identifier, prompt version, parameters, latency, model failures and any measured cost. Report repeat runs if outputs vary; never tune on the hidden labels.</p></section><section id="doc7"><h2>08 | Kickoff workshop and practical labs</h2>
+<p>Suggested duration: 5.5 hours plus breaks. Existing Python and AI knowledge is assumed. The objective is to help students understand the domain, contracts and validation logic before adding a model.</p>
+<table><tr><th>Session</th><th>Minutes</th><th>Practical outcome</th></tr><tr><td>Claim lifecycle and boundaries</td><td>45</td><td>Explain a claim and distinguish pre-validation from payer approval.</td></tr><tr><td>Data and FHIR orientation</td><td>60</td><td>Locate fields, join CSVs and trace a FHIR resource reference.</td></tr><tr><td>Rules with bounded AI</td><td>75</td><td>Run baseline; implement one rule; ground one explanation.</td></tr><tr><td>Trust and evaluation</td><td>60</td><td>Compare statuses, test false alarms and inspect an injection case.</td></tr><tr><td>Team exercise</td><td>90</td><td>Show findings, evidence and a recorded human decision.</td></tr></table>
+<h3>Before the workshop: readiness check</h3>
+<p>Read JSONL, count claims, print a service date and report a missing invoice_number. Explain null versus an empty array. Use a short Python/JSON refresher if needed.</p>
+<h3>Lab 1: understand before coding</h3>
+<p>Open the worked examples. Predict the outcome for a clean claim, a clear issue and an unknown case. Trace the fields before reading the answers.</p>
+<h3>Lab 2: implement R012</h3>
+<p>Sum the submitted line net_amount values with decimal arithmetic and compare against total_amount. Test exact equality, a difference of 0.01, a difference of 0.02, and a missing amount. Explain why R007 and R012 answer different questions. Return evidence pointers and all required output fields.</p>
+<h3>Lab 3: authorization and dependencies</h3>
+<p>Implement R008, then design R009. Compare an absent authorization ID, a referenced but absent record, a denied authorization, an expired approval and a shared authorization with excess total quantity. Avoid double-counting the same authorization allocation.</p>
+<h3>Lab 4: explain without inventing</h3>
+<p>Start with the mock, then add your model adapter. Supply the rule and validated finding. Require JSON and reject invented citations. Test untrusted instructions and record unsupported facts.</p>
+<h3>Lab 5: review and audit</h3>
+<p>In the review page, record one confirmed issue, one dismissal with reason and one information request. Export decisions and append them to the audit log. Verify the chain, then edit a copied log entry and demonstrate detection. Discuss why hashing alone cannot stop a person replacing an entire log.</p>
+<h3>End-of-day exit criteria</h3>
+<p>Each team reproduces a run, explains three cases, implements one new rule and shows a reviewer action. Agree the next three tasks, owners and one mentor question.</p></section><section id="doc8"><h2>09 | Work plan and submission templates</h2>
+<p>This is a suggested four-week sequence. Adjust to the organizer&#x27;s actual calendar; no dates or available team hours have been assumed.</p>
+<table><tr><th>Stage</th><th>Focus</th><th>Exit evidence</th></tr><tr><td>Week 1</td><td>Understand data; run baseline; implement core validation</td><td>Reproducible setup, data map, first tests and review screenshot.</td></tr><tr><td>Week 2</td><td>Complete 15 rules; evidence and uncertainty</td><td>Per-rule metrics, edge-case tests, complete structured outputs.</td></tr><tr><td>Week 3</td><td>Bounded AI; review workflow; audit</td><td>Grounded explanation examples, failure fallback, human action trace.</td></tr><tr><td>Week 4</td><td>Evaluation; hardening; documentation; demo</td><td>Frozen version, error analysis, demo video, report and pitch.</td></tr></table>
+<h3>Suggested weekly mentor review: 30 minutes</h3>
+<p>Five minutes on a working demonstration; ten on errors and evidence; ten on decisions/blockers; five on next commitments. Bring concrete claims and rule IDs, not only screenshots or general progress percentages.</p>
+<h3>Definition of done for each rule</h3>
+<p>The rule is documented, implemented, emits the correct schema, references original evidence, handles nulls and boundaries, has at least one positive/negative/unknown test where applicable, and has been reviewed by another teammate. Record any rule clarification in a versioned decision log before changing expected behaviour.</p>
+<h3>Included editable templates</h3>
+<p>templates/Architecture_Decisions.md records context, options, decision and consequences. templates/Evaluation_Report.md records versions, metrics, error analysis and limits. templates/Weekly_Update.md captures a demo, decisions, blockers and commitments. templates/Final_Submission_Checklist.md is the final handover checklist.</p>
+<h3>Suggested final demonstration: 7 minutes</h3>
+<p>One minute: problem and scope. Two minutes: clean claim and clear issues. One minute: uncertainty and information request. One minute: grounded AI explanation plus fallback. One minute: evidence, review and audit trail. One minute: measured results, limitations and next steps. Follow the organizer&#x27;s actual presentation time if different.</p>
+<p>Avoid promising a real denial-reduction percentage from this synthetic exercise. Explain which administrative errors your implementation detects and how you measured them.</p></section><section id="doc9"><h2>10 | Privacy, security and audit design</h2>
+<h3>Data boundaries</h3>
+<p>All supplied patients, identifiers, services, policies and documents are synthetic. Do not add real records to the challenge repository. Do not treat the lack of personal information in this dataset as a completed compliance assessment for a future healthcare product.</p>
+<p>Keep claim text separate from instructions. Allow the AI helper only read-only access to supplied claim evidence and rules. No shell execution, external browsing, message sending or payer submission is required. Do not put API keys in prompts, code, screenshots or audit logs.</p>
+<h3>Failure behaviour</h3>
+<p>Malformed input becomes an explicit ingestion error. Unknown policy or missing necessary evidence becomes unable to assess. A timeout, unavailable model or invalid generated JSON falls back to deterministic findings and logs the error. Failed checks remain visible. Tool outputs and documents cannot grant new permissions.</p>
+<h3>Human review</h3>
+<p>Keep automated findings separate from review decisions. Require an actor, timestamp and reason. A dismissal must be explainable and preserve the original issue. A corrected claim creates a new input version and a rerun; clicking a button alone must not change an error into a pass. The supplied static interface uses self-declared reviewer names and does not authenticate users.</p>
+<h3>Audit prototype versus immutable logging</h3>
+<p>The supplied audit.py chains event hashes and detects an edited entry when later hashes have not also been rewritten. It is a single-process teaching prototype. It does not prevent log deletion, rollback, replacement, concurrent corruption or unauthorized access. It also does not automatically capture every model call or rule run; teams must add run-level events.</p>
+<p>For the challenge&#x27;s immutable-audit design requirement, document how you would combine authenticated actors, least-privilege append-only writes, retention-locked storage, independent trusted timestamps/head hashes, backups and controlled exports. Demonstrate prototype tamper detection and state which of these controls you actually implemented. Do not label a mutable local JSON file immutable.</p>
+<h3>Security exercise acceptance</h3>
+<p>Attachment instructions cannot change a rule outcome. The model receives no secrets. The UI escapes source text. Invalid model output does not enter the authoritative result set. A reviewer can inspect the source, and all unresolved checks remain visible. Record these tests and limitations in the final report.</p></section><section id="doc10"><h2>11 | FHIR R4 mapping guide</h2>
+<p>The authoritative evaluation input is the normalized envelope. Each claim also has an educational FHIR R4-style collection Bundle in fhir_bundles.jsonl. These files support an integration exercise; they are not a complete national implementation guide or live payer request.</p>
+<p>A Claim describes services and the associated reimbursement request. Read the official <a href="https://hl7.org/fhir/R4/claim.html">HL7 R4 Claim specification</a>. In this pack, claim_id maps to Claim.id, service code/date/quantity map to Claim.item, and submitted total maps to Claim.total. Claim.insurance points to Coverage; supportingInfo points to attached DocumentReference records.</p>
+<p>Coverage supplies the beneficiary, payer and date period. The mapping uses Coverage.beneficiary, payor and period. These fields are described in the <a href="https://hl7.org/fhir/R4/coverage.html">HL7 R4 Coverage specification</a>. Membership is projected into subscriberId for this simplified teaching example; a real enrollment design needs its own modeling decisions.</p>
+<p>The Bundle groups resources without representing a submission transaction. Each entry has a fullUrl used by resource references. See the <a href="https://hl7.org/fhir/R4/bundle.html">HL7 R4 Bundle specification</a>. Local example URLs use claimguard.example and are identifiers, not live endpoints.</p>
+<p>Supporting text is included as base64 text/plain in DocumentReference.content. Patient and document metadata remain explicit. See <a href="https://hl7.org/fhir/R4/documentreference.html">HL7 R4 DocumentReference</a>. Decode the text for viewing; never execute it as instructions.</p>
+<h3>Mapping coverage</h3>
+<table><tr><th>Normalized content</th><th>Projection</th></tr><tr><td>patient_id and member_id</td><td>Patient.id and identifier.</td></tr><tr><td>provider_id and payer_id</td><td>Organization resources and references.</td></tr><tr><td>invoice_number, diagnosis_code</td><td>Claim.identifier and diagnosisCodeableConcept with invented local codes.</td></tr><tr><td>line service/date/quantity/amount</td><td>Claim.item fields; sequence follows array order.</td></tr><tr><td>coverage dates/status</td><td>Coverage period/status.</td></tr><tr><td>authorization_id</td><td>Claim.insurance.preAuthRef plus a teaching line extension.</td></tr><tr><td>attachments</td><td>DocumentReference and Claim.supportingInfo.</td></tr></table>
+<h3>Deliberate limitations</h3>
+<p>The line-authorization extension URL is a teaching convention without a published StructureDefinition. Full authorization details, policy limits, notes and some source metadata remain in the normalized sidecar; FHIR files alone are insufficient to reproduce all 15 checks. No reverse adapter is included. Keep normalized JSON as the benchmark input while implementing a selected mapping exercise.</p>
+<p>Some business-inconsistent records intentionally reference a different document patient. Resource-shape checks are distinct from reference resolution and payer-rule checks. Do not assume that a structurally plausible FHIR resource is a valid claim.</p>
+<p>QA checks mapping basics, not full HL7 conformance or national profiles. A production integration requires the relevant HL7, terminology, extension and partner-profile validation.</p></section><section id="doc11"><h2>12 | Troubleshooting and common mistakes</h2>
+<table><tr><th>Symptom</th><th>What to check</th></tr><tr><td>python command not found</td><td>Try py on Windows or python3 on macOS/Linux; install/configure Python if absent.</td></tr><tr><td>File not found</td><td>Run commands from the extracted student root containing README.md.</td></tr><tr><td>Low baseline score</td><td>Expected: only R001, R003 and R006 are implemented. Inspect per-rule metrics.</td></tr><tr><td>Missing/extra prediction pairs</td><td>Supply every claim and all 15 rules exactly once; do not score a limited run against full gold.</td></tr><tr><td>Evidence mismatch</td><td>Preserve original values and zero-based JSON pointer indices; do not cite transformed copies.</td></tr><tr><td>Apparent duplicate findings</td><td>R008 and R009, or R007 and R012, check different conditions; inspect the rulebook.</td></tr><tr><td>Boundary date fails</td><td>Dates are inclusive; use service date, never the computer&#x27;s current date.</td></tr><tr><td>0.01 amount difference fails</td><td>The tolerance is inclusive; use Decimal and ROUND_HALF_UP.</td></tr><tr><td>Unknown policy treated as valid</td><td>An absent policy prevents dependent checks; report unable to assess.</td></tr><tr><td>Review decision disappeared</td><td>Download decisions before closing/reloading the browser tab. The static page has no database.</td></tr><tr><td>Audit verification fails</td><td>Inspect whether earlier content was modified; work on a copy for tamper exercises.</td></tr><tr><td>FHIR does not contain every field</td><td>The normalized envelope is the authoritative sidecar; see the mapping limits.</td></tr></table>
+<p>When asking the mentor for help, include the claim ID, rule ID, expected and actual status, relevant evidence paths, command used and version/commit. Do not paste API keys or real patient data.</p>
+<p>If you disagree with a label, build the smallest example and explain the exact rule wording. Record a clarification and version change rather than silently changing the benchmark or copying a label into your prediction code.</p></section><section id="doc12"><h2>13 | Worked examples</h2>
+<p>These ten examples reuse public dataset records; they do not increase the dataset count. Each complete input and all 15 expected outputs appear in examples/worked_cases.json. Compare your manual prediction before inspecting the answer. For each case, locate the evidence, explain the rule and state the next human action. Preserve the original record.</p>
+<h3>Clean claim</h3>
+<p>Claim: <code>CG-27BFD8541DEB</code>.</p>
+<p>All applicable checks pass on the supplied evidence. This is not a payer approval.</p>
+<h3>Coverage date issue</h3>
+<p>Claim: <code>CG-1CB04117F0CB</code>.</p>
+<p class="bullet">• <strong>R003: FAIL</strong> - service outside coverage period Evidence: <code>/coverage/status</code>, <code>/coverage/start_date</code>, <code>/coverage/end_date</code>, <code>/lines/0/service_date</code>.</p>
+<h3>Missing authorization</h3>
+<p>Claim: <code>CG-B39790AC3604</code>.</p>
+<p class="bullet">• <strong>R008: FAIL</strong> - Required authorization ID missing Evidence: <code>/lines/0/service_code</code>, <code>/lines/0/authorization_id</code>.</p>
+<p class="bullet">• <strong>R009: UNABLE_TO_ASSESS</strong> - Cannot inspect authorization without an ID Evidence: <code>/lines/0/service_code</code>, <code>/lines/0/authorization_id</code>.</p>
+<h3>Missing document</h3>
+<p>Claim: <code>CG-610536BBB38B</code>.</p>
+<p class="bullet">• <strong>R010: FAIL</strong> - Matching required document absent Evidence: <code>/attachments</code>, <code>/lines/0/service_code</code>, <code>/lines/0/service_date</code>.</p>
+<h3>Possible duplicate</h3>
+<p>Claim: <code>CG-63A3C6B299C0</code>.</p>
+<p class="bullet">• <strong>R003: FAIL</strong> - service outside coverage period Evidence: <code>/coverage/status</code>, <code>/coverage/start_date</code>, <code>/coverage/end_date</code>, <code>/lines/0/service_date</code>.</p>
+<p class="bullet">• <strong>R005: FAIL</strong> - Provider absent from supplied network Evidence: <code>/provider_id</code>, <code>/policy_id</code>.</p>
+<p class="bullet">• <strong>R006: FAIL</strong> - Possible duplicate lines require review. Evidence: <code>/lines/0/service_code</code>, <code>/lines/0/service_date</code>, <code>/lines/0/modifier</code>, <code>/lines/1/service_code</code>.</p>
+<p class="bullet">• <strong>R007: FAIL</strong> - Line amount differs from quantity times price Evidence: <code>/lines/0/quantity</code>, <code>/lines/0/unit_price</code>, <code>/lines/0/net_amount</code>, <code>/lines/1/quantity</code>.</p>
+<h3>Unknown coverage boundary</h3>
+<p>Claim: <code>CG-91E018F1841E</code>.</p>
+<p class="bullet">• <strong>R003: UNABLE_TO_ASSESS</strong> - coverage period Evidence: <code>/coverage/status</code>, <code>/coverage/start_date</code>, <code>/coverage/end_date</code>, <code>/lines/0/service_date</code>.</p>
+<h3>Draft document</h3>
+<p>Claim: <code>CG-F5F2411AC3AD</code>.</p>
+<p class="bullet">• <strong>R010: UNABLE_TO_ASSESS</strong> - Only draft or uncertain matching documentation Evidence: <code>/attachments</code>, <code>/lines/0/service_code</code>, <code>/lines/0/service_date</code>.</p>
+<h3>Untrusted document instruction</h3>
+<p>Claim: <code>CG-116C84D4774D</code>.</p>
+<p class="bullet">• <strong>R012: FAIL</strong> - Claim total differs from submitted line amounts Evidence: <code>/total_amount</code>, <code>/lines/0/net_amount</code>.</p>
+<h3>Legitimate repeated service with modifier</h3>
+<p>Claim: <code>CG-64AD4A3E3A00</code>.</p>
+<p>All applicable checks pass on the supplied evidence. This is not a payer approval.</p>
+<h3>Unknown policy</h3>
+<p>Claim: <code>CG-128A977172C2</code>.</p>
+<p class="bullet">• <strong>R005: UNABLE_TO_ASSESS</strong> - No policy is supplied for this policy_id. Evidence: <code>/policy_id</code>.</p>
+<p class="bullet">• <strong>R008: UNABLE_TO_ASSESS</strong> - No policy is supplied for this policy_id. Evidence: <code>/policy_id</code>.</p>
+<p class="bullet">• <strong>R009: UNABLE_TO_ASSESS</strong> - No policy is supplied for this policy_id. Evidence: <code>/policy_id</code>.</p>
+<p class="bullet">• <strong>R010: UNABLE_TO_ASSESS</strong> - No policy is supplied for this policy_id. Evidence: <code>/policy_id</code>.</p>
+<p class="bullet">• <strong>R013: UNABLE_TO_ASSESS</strong> - No policy is supplied for this policy_id. Evidence: <code>/policy_id</code>.</p>
+<p class="bullet">• <strong>R014: UNABLE_TO_ASSESS</strong> - No policy is supplied for this policy_id. Evidence: <code>/policy_id</code>.</p>
+<p class="bullet">• <strong>R015: UNABLE_TO_ASSESS</strong> - No policy is supplied for this policy_id. Evidence: <code>/policy_id</code>.</p></section><section id="doc13"><h2>14 | Sources, provenance and release notes</h2>
+<h3>Source basis</h3>
+<p>This starter pack implements the agreed educational ClaimGuard AI scope: synthetic claims, 10-15 fictional payer rules, evidence-based findings, human review, auditability, a usable interface and evaluation. The pack selects 15 rules and provides concrete definitions, data and tooling. The original CSTAM Book file was not available during preparation; these documents do not replace organizer instructions or assert official scoring criteria.</p>
+<h3>Technical references checked on 17 September 2026</h3>
+<p class="bullet">• <a href="https://hl7.org/fhir/R4/claim.html">HL7 FHIR R4 Claim</a></p>
+<p class="bullet">• <a href="https://hl7.org/fhir/R4/coverage.html">HL7 FHIR R4 Coverage</a></p>
+<p class="bullet">• <a href="https://hl7.org/fhir/R4/bundle.html">HL7 FHIR R4 Bundle</a></p>
+<p class="bullet">• <a href="https://hl7.org/fhir/R4/documentreference.html">HL7 FHIR R4 DocumentReference</a></p>
+<p>These references inform the educational mapping. The fictional rulebook and codes were created for this pack and are not sourced from those standards. Do not interpret them as medical guidance, real payer policy or regulatory requirements.</p>
+<h3>Release 1.0.0</h3>
+<p>600 public claims: 400 development, 150 validation, 50 stress. A separate mentor pack contains 200 held-out claims. Normalized JSONL, relational CSV and FHIR-style projections are included. Public expected results cover all 15 rules. The offline baseline implements three rules. Model integration, the other 12 rules, production access controls and full immutable logging remain student work.</p>
+<p>All code and synthetic content in this pack were prepared specifically for this educational task. No patient data, commercial code lists, real payer contracts or external credentials are included. External standards remain governed by their publishers&#x27; terms. The project owner should set any formal distribution or intellectual-property terms with CSTAM organizers.</p>
+<h3>Reproducibility and limitations</h3>
+<p>Mentor-only construction scripts and scenario metadata are retained separately to prevent leakage of held-out answers. Public input/output files have SHA-256 manifests. Labels were generated with the complete reference implementation and cross-checked with independent hand-designed cases; they are an instructional oracle, not real clinical or reimbursement ground truth.</p>
+<p>See QA_REPORT.md for the actual checks performed. Report suspected errors to the mentor with a minimal example; publish corrections as a new pack version and preserve the previous version for reproducibility.</p></section><section id="doc14"><h2>15 | Initial team backlog</h2>
+<p>Each task should have an owner and a short review note. The order below follows dependencies. Keep the code simple until all checks and evidence are correct.</p>
+<table><tr><th>ID</th><th>Task</th><th>Completion evidence</th></tr><tr><td>T01</td><td>Run baseline, tests and validation on every teammate&#x27;s laptop</td><td>Saved terminal output and setup note.</td></tr><tr><td>T02</td><td>Explain three worked cases without looking at labels</td><td>Manual findings with pointers and rule IDs.</td></tr><tr><td>T03</td><td>Add R002, R004 and R005</td><td>Positive, negative and unknown tests.</td></tr><tr><td>T04</td><td>Add R007, R012 and R015</td><td>Decimal/tolerance cases and currency mismatch.</td></tr><tr><td>T05</td><td>Add R011 and R013</td><td>Unknown code, limit boundaries and invalid quantities.</td></tr><tr><td>T06</td><td>Add R008 and R009</td><td>Missing references, absent records and aggregate limits.</td></tr><tr><td>T07</td><td>Add R010 and R014</td><td>Document identity/status and submission boundaries.</td></tr><tr><td>T08</td><td>Produce all 15 results per claim</td><td>Strict evaluator accepts a complete run.</td></tr><tr><td>T09</td><td>Add a model explanation adapter and fallback</td><td>Manual scorecard and invalid-output tests.</td></tr><tr><td>T10</td><td>Build review queue and correction/recheck workflow</td><td>Source and decisions remain separate.</td></tr><tr><td>T11</td><td>Add run-level trace metadata</td><td>Input hash, rule/model/prompt versions and errors.</td></tr><tr><td>T12</td><td>Freeze and evaluate a release</td><td>Versioned report, error analysis and demo.</td></tr></table>
+<p>Stretch tasks after the core MVP: a selected FHIR ingestion adapter with explicit unsupported fields; policy version switching; comparison of two model explanation approaches; authenticated review and a durable audit design. Do not expand into real patient data, clinical decisions or live claim submission for this challenge.</p></section></main></html>

@@ -1,0 +1,26 @@
+[
+  {
+    "code": "DX-EDU-01",
+    "display": "Fictional teaching diagnosis 1; no clinical meaning"
+  },
+  {
+    "code": "DX-EDU-02",
+    "display": "Fictional teaching diagnosis 2; no clinical meaning"
+  },
+  {
+    "code": "DX-EDU-03",
+    "display": "Fictional teaching diagnosis 3; no clinical meaning"
+  },
+  {
+    "code": "DX-EDU-04",
+    "display": "Fictional teaching diagnosis 4; no clinical meaning"
+  },
+  {
+    "code": "DX-EDU-05",
+    "display": "Fictional teaching diagnosis 5; no clinical meaning"
+  },
+  {
+    "code": "DX-EDU-06",
+    "display": "Fictional teaching diagnosis 6; no clinical meaning"
+  }
+]

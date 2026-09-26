@@ -19,7 +19,12 @@ does the other four, identically for all fifteen rules.
 """
 from typing import List, NamedTuple, Optional, Sequence, Tuple
 
+from claimguard._pack import pointer
+
 from .context import RuleContext
+
+RULE_STATUSES = ("PASS", "FAIL", "UNABLE_TO_ASSESS", "NOT_APPLICABLE")
+"""What a rule can conclude. NOT_IMPLEMENTED is the runner's, never a rule's."""
 
 
 class Verdict(NamedTuple):
@@ -118,6 +123,50 @@ class Findings:
           - status is one of the four rule statuses
           - the message is non-blank after strip()
           - at least one evidence path exists
+          - every evidence path resolves in the claim
           - every line ID belongs to this claim
+
+        These are explicit raises, not assert statements, so they still run
+        under python -O.
         """
-        raise NotImplementedError("Findings.verdict is not implemented yet")
+        failures, unknowns = self.failures, self.unknowns
+
+        if failures:
+            status = "FAIL"
+            text = "; ".join(failures)
+            if unknowns:
+                text += "; Additional unknown inputs: " + ", ".join(unknowns)
+        elif unknowns:
+            status = "UNABLE_TO_ASSESS"
+            text = "; ".join(unknowns)
+        elif not self._applicable:
+            status = "NOT_APPLICABLE"
+            text = not_applicable_message
+        else:
+            status = "PASS"
+            text = pass_message
+
+        if message is not None and status in ("FAIL", "UNABLE_TO_ASSESS"):
+            text = message
+
+        paths = tuple(dict.fromkeys(self._paths)) or tuple(dict.fromkeys(fallback_evidence))
+        position = {line["line_id"]: i for i, line in enumerate(self.ctx.claim["lines"])}
+        line_ids = tuple(sorted(set(self._line_ids), key=lambda lid: position.get(lid, -1)))
+
+        where = f"{self.ctx.rule_id} on {self.ctx.claim.get('claim_id')}"
+        if status not in RULE_STATUSES:
+            raise AssertionError(f"{where}: invalid status {status!r}")
+        if not isinstance(text, str) or not text.strip():
+            raise AssertionError(f"{where}: {status} needs a non-blank explanation")
+        if not paths:
+            raise AssertionError(f"{where}: {status} cites no evidence; cite() what you inspected or pass fallback_evidence")
+        for path in paths:
+            try:
+                pointer(self.ctx.claim, path)
+            except (KeyError, IndexError, ValueError, TypeError):
+                raise AssertionError(f"{where}: evidence path {path!r} does not exist in the claim") from None
+        foreign = [lid for lid in line_ids if lid not in position]
+        if foreign:
+            raise AssertionError(f"{where}: line IDs {foreign} are not lines of this claim")
+
+        return Verdict(status, paths, text, line_ids)

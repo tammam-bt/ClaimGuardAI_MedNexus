@@ -1,8 +1,5 @@
 """Tests for the rule-engine interface (claimguard.engine).
 
-The verdict() contract tests are marked expectedFailure until Block C1
-implements it. When C1 lands, remove the markers: an expected failure that
-starts passing is reported as an unexpected success and fails the suite.
 """
 import dataclasses
 import sys
@@ -90,84 +87,81 @@ class VerdictContractTests(unittest.TestCase):
     """The spec for Block C1. Each test mirrors the rulebook's conventions or
     a check in src/evaluate.py:index()."""
 
-    @unittest.expectedFailure
     def test_failure_beats_unknown(self):
         f = Findings(make_ctx()).cite("/member_id")
         f.unknown("coverage period").fail("service outside coverage period", "/lines/0/service_date", line_id="L1")
         self.assertEqual(f.verdict("ok").status, "FAIL")
 
-    @unittest.expectedFailure
     def test_unknown_beats_pass(self):
         f = Findings(make_ctx()).cite("/member_id").unknown("coverage period")
         self.assertEqual(f.verdict("ok").status, "UNABLE_TO_ASSESS")
 
-    @unittest.expectedFailure
     def test_unknown_beats_not_applicable(self):
         f = Findings(make_ctx(), applicable=False).cite("/member_id")
         f.unknown("unknown service code")
         self.assertEqual(f.verdict("ok", not_applicable_message="n/a").status, "UNABLE_TO_ASSESS")
 
-    @unittest.expectedFailure
     def test_not_applicable_when_never_marked(self):
         v = Findings(make_ctx(), applicable=False).cite("/lines").verdict("ok", not_applicable_message="No line requires it.")
         self.assertEqual((v.status, v.message), ("NOT_APPLICABLE", "No line requires it."))
 
-    @unittest.expectedFailure
     def test_clean_is_pass_with_pass_message(self):
         v = Findings(make_ctx()).cite("/member_id").verdict("All good.")
         self.assertEqual((v.status, v.message), ("PASS", "All good."))
 
-    @unittest.expectedFailure
     def test_failure_message_keeps_uncertainty(self):
         f = Findings(make_ctx()).cite("/member_id")
         f.fail("b reason").fail("a reason").unknown("service date").unknown("coverage period")
         self.assertEqual(f.verdict("ok").message,
                          "a reason; b reason; Additional unknown inputs: coverage period, service date")
 
-    @unittest.expectedFailure
     def test_unknown_message_joins_reasons(self):
         f = Findings(make_ctx()).cite("/member_id").unknown("b").unknown("a")
         self.assertEqual(f.verdict("ok").message, "a; b")
 
-    @unittest.expectedFailure
     def test_message_override_applies_to_fail(self):
         f = Findings(make_ctx()).fail("x", "/member_id")
         self.assertEqual(f.verdict("ok", message="Required information is missing.").message,
                          "Required information is missing.")
 
-    @unittest.expectedFailure
     def test_evidence_deduplicated_in_first_cited_order(self):
-        f = Findings(make_ctx()).cite("/b", "/a").fail("x", "/a", "/c")
-        self.assertEqual(f.verdict("ok").paths, ("/b", "/a", "/c"))
+        f = Findings(make_ctx()).cite("/member_id", "/claim_id").fail("x", "/claim_id", "/lines")
+        self.assertEqual(f.verdict("ok").paths, ("/member_id", "/claim_id", "/lines"))
 
-    @unittest.expectedFailure
     def test_fallback_evidence_used_only_when_nothing_cited(self):
         self.assertEqual(Findings(make_ctx()).verdict("ok", fallback_evidence=["/lines"]).paths, ("/lines",))
         cited = Findings(make_ctx()).cite("/member_id").verdict("ok", fallback_evidence=["/lines"])
         self.assertEqual(cited.paths, ("/member_id",))
 
-    @unittest.expectedFailure
     def test_line_ids_in_claim_order_and_distinct(self):
         f = Findings(make_ctx(3)).cite("/lines")
         f.fail("x", line_id="L3").fail("x", line_id="L1").fail("y", line_id="L3")
         self.assertEqual(f.verdict("ok").line_ids, ("L1", "L3"))
 
-    @unittest.expectedFailure
     def test_rejects_result_with_no_evidence(self):
         with self.assertRaises(AssertionError):
             Findings(make_ctx()).verdict("ok")
 
-    @unittest.expectedFailure
     def test_rejects_blank_message(self):
         with self.assertRaises(AssertionError):
             Findings(make_ctx()).cite("/member_id").verdict("   ")
 
-    @unittest.expectedFailure
     def test_rejects_foreign_line_id(self):
         with self.assertRaises(AssertionError):
             Findings(make_ctx()).fail("x", "/member_id", line_id="L99").verdict("ok")
 
-    @unittest.expectedFailure
+    def test_rejects_evidence_path_missing_from_claim(self):
+        with self.assertRaisesRegex(AssertionError, "/no_such_field"):
+            Findings(make_ctx()).cite("/no_such_field").verdict("ok")
+
+    def test_null_field_is_valid_evidence(self):
+        v = Findings(make_ctx()).fail("member ID is missing", "/member_id").verdict("ok")
+        self.assertEqual((v.status, v.paths), ("FAIL", ("/member_id",)))
+
+    def test_line_ids_only_come_from_failures(self):
+        f = Findings(make_ctx()).cite("/lines").unknown("service date")
+        self.assertEqual(f.verdict("ok").line_ids, ())
+
     def test_not_applicable_requires_a_message(self):
         with self.assertRaises(AssertionError):
             Findings(make_ctx(), applicable=False).cite("/lines").verdict("ok")

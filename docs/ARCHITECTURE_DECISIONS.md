@@ -75,3 +75,26 @@ Two conventions are taken from the gold data rather than chosen: across 9,000 pu
 **Consequences and known limitations:** Rules whose baseline messages are fixed strings (R001, R006) pass `message=` to override composition. Byte-identical reproduction of the baseline output is the acceptance test for this design (Block D).
 
 **Verification evidence:** `tests/test_engine.py` encodes the full `verdict()` contract as 15 tests marked `expectedFailure` until Block C1 implements it.
+
+## ADR-004 | Policies resolve exactly, with no fallback, and are frozen
+
+Date / authors / commit: 2026-09-26 / Tammam Bettayeb / branch `tb/u2.4-policy`
+
+**Context and constraint:** Seven rules (R005, R008, R009, R010, R013, R014, R015) read the claim's policy. The public data contains an unrecognised `policy_id`, `EDU-NO-POLICY`, on 15 of 600 claims. The rulebook: *"An unrecognized policy_id means no matching policy was supplied, not proof of non-coverage."*
+
+**Options considered:**
+1. Fall back to a default policy (e.g. EDU-BASIC) when the ID is unknown.
+2. Resolve exactly; return `None` for an unknown ID and let each rule abstain.
+3. Normalise the ID (trim, fold case) before lookup.
+
+**Decision and rationale:** Option 2. A fallback invents coverage terms the claim never had, which is exactly what the rulebook forbids. Normalising (option 3) breaks the rulebook's instruction not to silently trim or repair source data, and its statement that exact identifiers are case-sensitive.
+
+Policies are also deep-frozen on load (`MappingProxyType`, lists to tuples). The same two policy objects serve every claim in a run, so a rule that mutated one, for instance appending to `allowed_providers`, would silently change results for every later claim. Frozen, that raises `TypeError` or `AttributeError` at the offending line.
+
+**Data and tool permissions:** `PolicyBook` reads `rules/policies.json` once per run through `config()`. It never writes. Rules receive a read-only view.
+
+**Failure behaviour:** Unknown `policy_id` → `None`, and rules record an unknown. A `policies.json` entry whose key disagrees with its own `policy_id` raises `ValueError` at load, before any claim is evaluated.
+
+**Consequences and known limitations:** Frozen policies are not JSON-serialisable. This does not matter today, since evidence pointers resolve into the claim, never the policy. The claim has no policy-version field, so resolution is by ID only; policy version switching (a pack stretch goal) would need a new envelope field.
+
+**Verification evidence:** `tests/test_policy.py`: all 600 public claims resolve exactly when their policy exists, and exactly 15 resolve to `None`.

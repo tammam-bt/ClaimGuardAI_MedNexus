@@ -5,6 +5,7 @@ seed evidence, accumulate failures and unknowns, apply precedence, compose the
 message, build the result. A rule author writes only the second move. Findings
 does the other four, identically for all fifteen rules.
 
+    submitted = valid_date(ctx.claim["submission_date"])
     f = Findings(ctx)
     for i, line in ctx.lines():
         p = ctx.path("lines", i, "service_date")
@@ -119,4 +120,4 @@ class Findings:
           - at least one evidence path exists
           - every line ID belongs to this claim
         """
-        raise NotImplementedError("Block C1: implement precedence and assertions")
+        raise NotImplementedError("Findings.verdict is not implemented yet")

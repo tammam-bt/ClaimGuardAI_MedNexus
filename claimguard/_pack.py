@@ -16,8 +16,16 @@ import sys
 from pathlib import Path
 
 _SRC = Path(__file__).resolve().parents[1] / "src"
+if not (_SRC / "engine_core.py").is_file():
+    raise ImportError(
+        f"starter pack not found at {_SRC}. claimguard must be installed "
+        "editable from the repository root: uv pip install -e ."
+    )
+# Appended, not inserted first: src/ holds generic top-level names such as
+# evaluate and audit, which would otherwise shadow installed packages of the
+# same name (e.g. Hugging Face's evaluate) for the whole process.
 if str(_SRC) not in sys.path:
-    sys.path.insert(0, str(_SRC))
+    sys.path.append(str(_SRC))
 
 from engine_core import (  # noqa: E402
     STATUSES,

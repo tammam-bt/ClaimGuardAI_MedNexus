@@ -5,7 +5,10 @@ implements it. When C1 lands, remove the markers: an expected failure that
 starts passing is reported as an unexpected success and fails the suite.
 """
 import dataclasses
+import sys
 import unittest
+
+from claimguard._pack import pointer
 
 from claimguard.engine.context import RuleContext
 from claimguard.engine.findings import Findings
@@ -34,6 +37,10 @@ class ContextTests(unittest.TestCase):
     def test_path_escapes_pointer_characters(self):
         self.assertEqual(RuleContext.path("a/b", "c~d"), "/a~1b/c~0d")
 
+    def test_path_round_trips_through_the_packs_pointer(self):
+        obj = {"a/b": {"c~d": [10, 20]}}
+        self.assertEqual(pointer(obj, RuleContext.path("a/b", "c~d", 1)), 20)
+
     def test_lines_yields_index_and_line_in_order(self):
         self.assertEqual([(i, l["line_id"]) for i, l in make_ctx(3).lines()],
                          [(0, "L1"), (1, "L2"), (2, "L3")])
@@ -55,10 +62,15 @@ class RegistryTests(unittest.TestCase):
         finally:
             REGISTRY.pop("R998", None)
 
-    def test_discovery_imports_and_skips_template(self):
+    def test_malformed_rule_id_is_rejected(self):
+        for bad in ("R2", "r002", "R0002", "002", ""):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                rule(bad)
+
+    def test_discovery_skips_underscore_modules(self):
         import claimguard.rules  # noqa: F401
-        self.assertNotIn("RNNN", REGISTRY)
-        self.assertTrue(all(k.startswith("R") and len(k) == 4 for k in REGISTRY))
+        self.assertIn("claimguard.rules", sys.modules)
+        self.assertNotIn("claimguard.rules._template", sys.modules)
 
 
 class FindingsAccumulatorTests(unittest.TestCase):

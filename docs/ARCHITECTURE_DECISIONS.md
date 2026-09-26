@@ -45,10 +45,33 @@ Date / authors / commit: 2026-09-26 / Tammam Bettayeb / branch `tb/spine-skeleto
 
 **Failure behaviour:** The known hazard of a decorator registry is silence — an unimported module registers nothing and its rule reports `NOT_IMPLEMENTED` with no error. Two guards: auto-discovery removes the "forgot to add the import" case, and `rule()` raises `RuntimeError` on a duplicate registration rather than overwriting. The runner iterates `config()['rules']`, so a genuinely absent implementation still emits exactly one `NOT_IMPLEMENTED` result and the claim-rule pair count stays at 15.
 
-**Consequences and known limitations:** Import order across rule modules is not guaranteed, so no rule may depend on another at import time. Cross-rule dependencies (R009 reads R008's per-line outcome) are handled at evaluation time through `RuleContext.prior`, not through imports.
+**Consequences and known limitations:** Modules whose names start with an underscore are skipped, which is how `rules/_template.py` ships without registering. Import order across rule modules is not guaranteed, so no rule may depend on another at import time. Cross-rule dependencies (R009 reads R008's per-line outcome) are handled at evaluation time through `RuleContext.prior`, not through imports.
 
 **Verification evidence:**
 ```
 python -c "import claimguard.rules; from claimguard.engine.registry import REGISTRY; print(sorted(REGISTRY))"  -> []
 ```
 Empty is the expected result before any rule module exists, and proves discovery runs without finding anything.
+
+## ADR-003 | One accumulator owns precedence, messages and evidence
+
+Date / authors / commit: 2026-09-26 / Tammam Bettayeb / branch `tb/spine-skeleton`
+
+**Context and constraint:** The three baseline rules each re-implement the same logic with three different accumulator styles: R003 keeps lists of failures and unknowns, R006 a boolean `missing` flag, R001 a path list with a default substituted on PASS. Twelve more rules by three authors would produce twelve more variations of the precedence law, and the scorer rejects results for missing evidence, blank explanations and foreign line IDs.
+
+**Options considered:**
+1. Each rule returns a complete result dict via `make_result`, as the baseline does.
+2. A shared helper function for precedence only.
+3. A `Findings` accumulator that owns precedence, message composition, evidence ordering and line-ID ordering, and asserts the scorer's remaining rejection conditions.
+
+**Decision and rationale:** Option 3. Every rule follows the same five moves (seed evidence, accumulate, apply precedence, compose the message, build the result); only the second varies. Centralising the other four makes precedence impossible to get wrong per rule and turns four `evaluate.py` rejections into assertion failures inside our own tests, with a stack trace pointing at the rule responsible.
+
+Two conventions are taken from the gold data rather than chosen: across 9,000 public expected results, `affected_line_ids` appear only on FAIL (never on UNABLE_TO_ASSESS, PASS or NOT_APPLICABLE), and multi-line IDs are always in claim line order (62 of 62). So `unknown()` accepts no line ID, and `verdict()` orders line IDs by claim position whatever the call order.
+
+**Data and tool permissions:** `Findings` reads the `RuleContext` it was given and nothing else. It performs no I/O.
+
+**Failure behaviour:** `verdict()` raises `AssertionError` for an invalid status, a blank message, empty evidence or a line ID not in the claim. A rule that cannot produce a valid result fails loudly in tests instead of producing a run that `evaluate.py` rejects wholesale.
+
+**Consequences and known limitations:** Rules whose baseline messages are fixed strings (R001, R006) pass `message=` to override composition. Byte-identical reproduction of the baseline output is the acceptance test for this design (Block D).
+
+**Verification evidence:** `tests/test_engine.py` encodes the full `verdict()` contract as 15 tests marked `expectedFailure` until Block C1 implements it.

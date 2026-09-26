@@ -1,0 +1,165 @@
+"""Tests for the rule-engine interface (claimguard.engine).
+
+The verdict() contract tests are marked expectedFailure until Block C1
+implements it. When C1 lands, remove the markers: an expected failure that
+starts passing is reported as an unexpected success and fails the suite.
+"""
+import dataclasses
+import unittest
+
+from claimguard.engine.context import RuleContext
+from claimguard.engine.findings import Findings
+from claimguard.engine.registry import REGISTRY, rule
+
+
+def make_ctx(n_lines=2):
+    claim = {
+        "claim_id": "CG-TEST",
+        "member_id": None,
+        "lines": [{"line_id": f"L{i + 1}", "service_date": "2026-03-01"} for i in range(n_lines)],
+    }
+    return RuleContext(
+        claim=claim,
+        rule={"rule_id": "R999", "severity": "high", "version": "1.0.0",
+              "source": "fictional-rulebook/R999@1.0.0", "corrective_action": "Fix it."},
+        policy=None, services={}, prior={},
+    )
+
+
+class ContextTests(unittest.TestCase):
+    def test_path_builds_json_pointers(self):
+        self.assertEqual(RuleContext.path("member_id"), "/member_id")
+        self.assertEqual(RuleContext.path("lines", 0, "service_date"), "/lines/0/service_date")
+
+    def test_path_escapes_pointer_characters(self):
+        self.assertEqual(RuleContext.path("a/b", "c~d"), "/a~1b/c~0d")
+
+    def test_lines_yields_index_and_line_in_order(self):
+        self.assertEqual([(i, l["line_id"]) for i, l in make_ctx(3).lines()],
+                         [(0, "L1"), (1, "L2"), (2, "L3")])
+
+    def test_context_is_frozen(self):
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            make_ctx().policy = {}
+
+    def test_rule_id_shortcut(self):
+        self.assertEqual(make_ctx().rule_id, "R999")
+
+
+class RegistryTests(unittest.TestCase):
+    def test_duplicate_registration_raises(self):
+        rule("R998")(lambda ctx: None)
+        try:
+            with self.assertRaises(RuntimeError):
+                rule("R998")(lambda ctx: None)
+        finally:
+            REGISTRY.pop("R998", None)
+
+    def test_discovery_imports_and_skips_template(self):
+        import claimguard.rules  # noqa: F401
+        self.assertNotIn("RNNN", REGISTRY)
+        self.assertTrue(all(k.startswith("R") and len(k) == 4 for k in REGISTRY))
+
+
+class FindingsAccumulatorTests(unittest.TestCase):
+    def test_reasons_are_distinct_and_sorted(self):
+        f = Findings(make_ctx())
+        f.fail("b").fail("a").fail("b")
+        f.unknown("z").unknown("y").unknown("z")
+        self.assertEqual(f.failures, ("a", "b"))
+        self.assertEqual(f.unknowns, ("y", "z"))
+
+    def test_unknown_does_not_accept_a_line_id(self):
+        with self.assertRaises(TypeError):
+            Findings(make_ctx()).unknown("x", line_id="L1")
+
+
+class VerdictContractTests(unittest.TestCase):
+    """The spec for Block C1. Each test mirrors the rulebook's conventions or
+    a check in src/evaluate.py:index()."""
+
+    @unittest.expectedFailure
+    def test_failure_beats_unknown(self):
+        f = Findings(make_ctx()).cite("/member_id")
+        f.unknown("coverage period").fail("service outside coverage period", "/lines/0/service_date", line_id="L1")
+        self.assertEqual(f.verdict("ok").status, "FAIL")
+
+    @unittest.expectedFailure
+    def test_unknown_beats_pass(self):
+        f = Findings(make_ctx()).cite("/member_id").unknown("coverage period")
+        self.assertEqual(f.verdict("ok").status, "UNABLE_TO_ASSESS")
+
+    @unittest.expectedFailure
+    def test_unknown_beats_not_applicable(self):
+        f = Findings(make_ctx(), applicable=False).cite("/member_id")
+        f.unknown("unknown service code")
+        self.assertEqual(f.verdict("ok", not_applicable_message="n/a").status, "UNABLE_TO_ASSESS")
+
+    @unittest.expectedFailure
+    def test_not_applicable_when_never_marked(self):
+        v = Findings(make_ctx(), applicable=False).cite("/lines").verdict("ok", not_applicable_message="No line requires it.")
+        self.assertEqual((v.status, v.message), ("NOT_APPLICABLE", "No line requires it."))
+
+    @unittest.expectedFailure
+    def test_clean_is_pass_with_pass_message(self):
+        v = Findings(make_ctx()).cite("/member_id").verdict("All good.")
+        self.assertEqual((v.status, v.message), ("PASS", "All good."))
+
+    @unittest.expectedFailure
+    def test_failure_message_keeps_uncertainty(self):
+        f = Findings(make_ctx()).cite("/member_id")
+        f.fail("b reason").fail("a reason").unknown("service date").unknown("coverage period")
+        self.assertEqual(f.verdict("ok").message,
+                         "a reason; b reason; Additional unknown inputs: coverage period, service date")
+
+    @unittest.expectedFailure
+    def test_unknown_message_joins_reasons(self):
+        f = Findings(make_ctx()).cite("/member_id").unknown("b").unknown("a")
+        self.assertEqual(f.verdict("ok").message, "a; b")
+
+    @unittest.expectedFailure
+    def test_message_override_applies_to_fail(self):
+        f = Findings(make_ctx()).fail("x", "/member_id")
+        self.assertEqual(f.verdict("ok", message="Required information is missing.").message,
+                         "Required information is missing.")
+
+    @unittest.expectedFailure
+    def test_evidence_deduplicated_in_first_cited_order(self):
+        f = Findings(make_ctx()).cite("/b", "/a").fail("x", "/a", "/c")
+        self.assertEqual(f.verdict("ok").paths, ("/b", "/a", "/c"))
+
+    @unittest.expectedFailure
+    def test_fallback_evidence_used_only_when_nothing_cited(self):
+        self.assertEqual(Findings(make_ctx()).verdict("ok", fallback_evidence=["/lines"]).paths, ("/lines",))
+        cited = Findings(make_ctx()).cite("/member_id").verdict("ok", fallback_evidence=["/lines"])
+        self.assertEqual(cited.paths, ("/member_id",))
+
+    @unittest.expectedFailure
+    def test_line_ids_in_claim_order_and_distinct(self):
+        f = Findings(make_ctx(3)).cite("/lines")
+        f.fail("x", line_id="L3").fail("x", line_id="L1").fail("y", line_id="L3")
+        self.assertEqual(f.verdict("ok").line_ids, ("L1", "L3"))
+
+    @unittest.expectedFailure
+    def test_rejects_result_with_no_evidence(self):
+        with self.assertRaises(AssertionError):
+            Findings(make_ctx()).verdict("ok")
+
+    @unittest.expectedFailure
+    def test_rejects_blank_message(self):
+        with self.assertRaises(AssertionError):
+            Findings(make_ctx()).cite("/member_id").verdict("   ")
+
+    @unittest.expectedFailure
+    def test_rejects_foreign_line_id(self):
+        with self.assertRaises(AssertionError):
+            Findings(make_ctx()).fail("x", "/member_id", line_id="L99").verdict("ok")
+
+    @unittest.expectedFailure
+    def test_not_applicable_requires_a_message(self):
+        with self.assertRaises(AssertionError):
+            Findings(make_ctx(), applicable=False).cite("/lines").verdict("ok")
+
+
+if __name__ == "__main__":
+    unittest.main()

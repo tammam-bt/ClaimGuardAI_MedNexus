@@ -7,7 +7,7 @@ Checklist before you open the PR:
   [ ] boundaries tested: inclusive dates, the inclusive 0.01 SAR tolerance
   [ ] no policy -> UNABLE_TO_ASSESS, unless a policy-free check proves a FAIL
   [ ] nothing reads expected_results.jsonl
-  [ ] no date.today() / datetime.now()
+  [ ] never reads the current date or time; use the claim's own dates
   [ ] per-rule accuracy from evaluate.py pasted in the PR description
 """
 from claimguard._pack import empty, money, valid_date  # noqa: F401

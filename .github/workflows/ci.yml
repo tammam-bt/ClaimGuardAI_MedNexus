@@ -1,0 +1,55 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: check (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10 is the floor in pyproject.toml and docs/06; 3.12 is what the team runs.
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install (editable, as documented)
+        run: python -m pip install -e .
+
+      - name: Starter pack integrity
+        run: python src/validate_pack.py
+
+      - name: Tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Rules never read the current date or time
+        run: |
+          if grep -rnE "date\.today|datetime\.now|time\.time\(" claimguard/rules/; then
+            echo "::error::A rule reads the wall clock. Use the claim's service and submission dates."
+            exit 1
+          fi
+
+      # Scores the pack baseline until our runner exists (U2.6), then switches
+      # to: python -m claimguard.run --input ... --output ...
+      - name: Evaluate on development claims
+        run: |
+          python src/run_baseline.py --input data/development/claims.jsonl --output outputs/dev_predictions.jsonl
+          python src/evaluate.py --gold data/development/expected_results.jsonl \
+            --pred outputs/dev_predictions.jsonl --claims data/development/claims.jsonl \
+            --output outputs/dev_metrics.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dev-metrics-py${{ matrix.python }}
+          path: outputs/dev_metrics.json

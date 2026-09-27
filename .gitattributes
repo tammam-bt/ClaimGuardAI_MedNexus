@@ -1,0 +1,28 @@
+# Line endings. Read this before changing anything here.
+#
+# Our own files are LF in the repository and in every checkout, on every OS,
+# whatever a contributor's core.autocrlf says.
+* text=auto eol=lf
+
+# The starter pack is byte-exact and never converted.
+# SHA256SUMS.json records the exact bytes of these files and validate_pack.py
+# checks them. They are not all LF: the pack's CSV files are CRLF, because
+# Python's csv module writes \r\n. Converting them either way breaks the
+# checksums, so git must leave them exactly as committed.
+/.gitignore                         -text
+/README.md                          -text
+/QA_REPORT.md                       -text
+/SHA256SUMS.json                    -text
+/START_HERE.html                    -text
+/requirements.txt                   -text
+/ClaimGuardAI_Student_Handbook.pdf  binary
+/data/**                            -text
+/docs/[0-9][0-9]_*.md               -text
+/examples/**                        -text
+/exercises/**                       -text
+/prompts/**                         -text
+/rules/**                           -text
+/schemas/**                         -text
+/src/**                             -text
+/templates/**                       -text
+/tests/test_baseline.py             -text

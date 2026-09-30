@@ -4,7 +4,7 @@ Team MedNexus | CSTAM-VELODOC ClaimGuard AI
 
 ## ADR-001 | Our code lives beside the pack, not inside it
 
-Date / authors / commit: 2026-09-26 / Tammam Bettayeb / branch `tb/spine-skeleton`
+Date / authors / commit: 2026-09-26 / Tammam BenBettaieb / branch `tb/spine-skeleton`
 
 **Context and constraint:** The starter pack ships 15 rules of which 3 are implemented, all inside one function (`base_check`) in one file (`src/engine_core.py`). Doc 06 suggests implementing further rules there. Five people must write the remaining 12 rules within one week.
 
@@ -30,7 +30,7 @@ python -c "import claimguard; print(claimguard.__version__)"  (from /tmp)       
 
 ## ADR-002 | Rules self-register; nothing central lists them
 
-Date / authors / commit: 2026-09-26 / Tammam Bettayeb / branch `tb/spine-skeleton`
+Date / authors / commit: 2026-09-26 / Tammam BenBettaieb / branch `tb/spine-skeleton`
 
 **Context and constraint:** Twelve rules, three authors, one week. Any file that every author must edit becomes a conflict point and a serialization point.
 
@@ -55,7 +55,7 @@ Empty is the expected result before any rule module exists, and proves discovery
 
 ## ADR-003 | One accumulator owns precedence, messages and evidence
 
-Date / authors / commit: 2026-09-26 / Tammam Bettayeb / branch `tb/spine-skeleton`
+Date / authors / commit: 2026-09-26 / Tammam BenBettaieb / branch `tb/spine-skeleton`
 
 **Context and constraint:** The three baseline rules each re-implement the same logic with three different accumulator styles: R003 keeps lists of failures and unknowns, R006 a boolean `missing` flag, R001 a path list with a default substituted on PASS. Twelve more rules by three authors would produce twelve more variations of the precedence law, and the scorer rejects results for missing evidence, blank explanations and foreign line IDs.
 
@@ -78,7 +78,7 @@ Two conventions are taken from the gold data rather than chosen: across 9,000 pu
 
 ## ADR-004 | Policies resolve exactly, with no fallback, and are frozen
 
-Date / authors / commit: 2026-09-26 / Tammam Bettayeb / branch `tb/u2.4-policy`
+Date / authors / commit: 2026-09-26 / Tammam BenBettaieb / branch `tb/u2.4-policy`
 
 **Context and constraint:** Seven rules (R005, R008, R009, R010, R013, R014, R015) read the claim's policy. The public data contains an unrecognised `policy_id`, `EDU-NO-POLICY`, on 15 of 600 claims. The rulebook: *"An unrecognized policy_id means no matching policy was supplied, not proof of non-coverage."*
 

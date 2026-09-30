@@ -1,0 +1,4 @@
+# Canonical author identities for git log / git shortlog.
+# Format: Canonical Name <canonical email> <email as committed>
+# Matching is by email, so a commit made under any name with that address maps here.
+Tammam BenBettaieb <68946477+tammam-bt@users.noreply.github.com> <tambett10@gmail.com>

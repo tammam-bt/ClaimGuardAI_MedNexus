@@ -98,3 +98,24 @@ Policies are also deep-frozen on load (`MappingProxyType`, lists to tuples). The
 **Consequences and known limitations:** Frozen policies are not JSON-serialisable. This does not matter today, since evidence pointers resolve into the claim, never the policy. The claim has no policy-version field, so resolution is by ID only; policy version switching (a pack stretch goal) would need a new envelope field.
 
 **Verification evidence:** `tests/test_policy.py`: all 600 public claims resolve exactly when their policy exists, and exactly 15 resolve to `None`.
+
+## ADR-005 | Ingestion checks each line on its own, against the full claim schema
+
+Date / authors / commit: 2026-10-01 / Mohammed Aziz Kadri / branch `mak/ingest-malformed-input`
+
+**Context and constraint:** `src/run_baseline.py` calls `validate_transport()` on every claim with no guard, so one malformed line aborts the run for every claim. Doc 03: a malformed JSON line, wrong structural type, duplicate line ID or missing transport key "is an ingestion error: quarantine it and report it separately, never silently drop it or create a passed claim." `validate_transport()` also lets through inputs that later break the run or behave differently per Python version: NaN and Infinity, which make `evaluate.py` reject the whole run (DEC-003); dates such as `20260525` that only Python 3.11+ reads (DEC-010); and non-object or incomplete coverage, authorization and attachment records (DEC-012).
+
+**Options considered:**
+1. Wrap `validate_transport()` in `try/except` and nothing more.
+2. Add hand-written checks for each hostile input found so far.
+3. Check each line against `validate_transport()` and then `schemas/claim.schema.json`, read from the file.
+
+**Decision and rationale:** Option 3. Option 1 fixes the crash but leaves every input behind DEC-003, DEC-010 and DEC-012 in the run. Option 2 is a list that grows with each attack. The schema already forbids all three: numbers must be finite, dates are `format: date`, and every nested record has required keys and `additionalProperties: false`. Enforcing it cannot cost a legitimate claim: QA_REPORT.md states that all 800 claims, the mentor's 200 held-out ones included, were checked against it, and `tests/test_ingest.py` confirms that all 600 public claims are accepted unchanged. A date must match `[0-9]{4}-[0-9]{2}-[0-9]{2}` (ASCII digits only; `\d` also matches fullwidth digits) and be a real calendar date, so every rule sees the same input on 3.10 and 3.12. Duplicate JSON keys are rejected, because `json.loads` silently keeps the last one and a reviewer reading the raw line could see a different value from the engine's.
+
+**Data and tool permissions:** `claimguard.ingest` reads the input file and `schemas/claim.schema.json`, and writes nothing unless run as a command. It imports from the pack only through `claimguard._pack`. The schema check implements exactly the keywords `claim.schema.json` uses and raises at import if the schema ever uses another, rather than ignoring it.
+
+**Failure behaviour:** A rejected line becomes an ingestion-error record, `{event, stage, reason, claim_id, provenance}`, with `stage` one of `decode`, `json`, `transport`, `contract` or `duplicate_claim_id`. Every other line is still read. A reason never quotes the input: it names a JSON pointer built from schema keys and array indices only, and a `claim_id` outside the public shape is reported as `null`, so untrusted text cannot reach a log or UI through an error. `python -m claimguard.ingest` writes the accepted lines' original bytes, unchanged, to `outputs/accepted.jsonl`, which the pack's runner and scorer read with every evidence value intact. It writes the errors to `outputs/ingestion_errors.jsonl` and exits 0.
+
+**Consequences and known limitations:** Provenance (adapter, adapter version, source file and its SHA-256, line number, SHA-256 of the line's original bytes) travels beside the claim in `Ingested`, never inside it, because `validate_transport()` rejects any extra envelope key. Ingestion errors are not yet in the audit chain: `src/audit.py` accepts only the four review actions until U4.4 (Role 1) extends it. They must never be logged as a review action such as `request_information`, which would forge a human decision. A rejected claim produces no results. That is what doc 03 asks, but if the mentor's claims file ever contains a claim this check rejects, `evaluate.py` will report missing pairs. **Question for the mentor:** can a held-out claim be outside `claim.schema.json`, and if so, what are its expected results? The CSV and FHIR adapters are not written yet; `adapter` is always `jsonl`.
+
+**Verification evidence:** `tests/test_ingest.py`, 21 tests, passing on Python 3.10 and 3.12. Among them: the pack's runner exits non-zero on a file with one broken line, while `python -m claimguard.ingest` reads it, and the runner then produces 3 × 15 results from the accepted file.

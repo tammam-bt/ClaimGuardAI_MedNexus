@@ -19,7 +19,7 @@ Date / authors / commit: 2026-09-26 / Tammam BenBettaieb / branch `tb/spine-skel
 
 **Failure behaviour:** If the pack moves or is replaced, exactly one file changes. `claimguard` must be installed editable (`uv pip install -e .`): a regular install copies the package into site-packages, away from `src/`, so `_pack.py` checks for `src/engine_core.py` and raises a clear `ImportError` instead of failing obscurely. `src/` is appended to `sys.path`, not inserted first, so its generic module names (`evaluate`, `audit`) cannot shadow installed packages. `make_result` stays authoritative for result construction: it resolves every evidence pointer against the original claim, so an evidence value can never disagree with the source and `evaluate.py`'s "Evidence value mismatch" cannot fire.
 
-**Consequences and known limitations:** We deviate from doc 06's suggestion to implement rules in `engine_core.py`. This is a suggestion, not a rule, and `validate_pack.py`'s own checksum message anticipates intentional edits. The root `README.md` will be replaced by ours, recorded in `PACK_DELTA.md` when that happens. New files are added under the pack's `tests/` directory; no existing pack file is modified. Anyone reading the pack's docs must be told that rules live in `claimguard/rules/`.
+**Consequences and known limitations:** We deviate from doc 06's suggestion to implement rules in `engine_core.py`. This is a suggestion, not a rule, and `validate_pack.py`'s own checksum message anticipates intentional edits. Our README lives at `.github/README.md`, which GitHub displays in preference to the root file. Replacing the root `README.md`, or widening the pack's `.gitignore`, would break `validate_pack.py`, which stops at the first checksum mismatch and so would leave every later pack file unchecked; `.env.example` documents the one ignored name instead. No existing pack file is modified; new files are added under the pack's `tests/` directory. Anyone reading the pack's docs must be told that rules live in `claimguard/rules/`.
 
 **Verification evidence:**
 ```
@@ -179,3 +179,45 @@ Date / authors / commit: 2026-10-01 / Mohammed Aziz Kadri / U1.4, U6.5
 **Consequences and known limitations:** Not HL7 validation; the document service code is read from `description`, a convention of this projection. Provenance records both files and lines.
 
 **Verification evidence:** `tests/test_fhir.py`.
+
+## ADR-009 | One command; the run survives bad input and failing rules, and says so
+
+Date / authors / commit: 2026-10-01 / Tammam BenBettaieb / branch `tb/u2.6-runner`
+
+**Context and constraint:** The mentor scores our code on 200 held-out claims. The pack's `run_baseline.py` stops at the first claim that fails `validate_transport`, and a crash means no score. Ingestion, the injection screen and the AI explainer each had their own command passing files between them.
+
+**Options considered:**
+1. Keep separate commands; document the order.
+2. One command that crashes on the first problem, as the baseline does.
+3. One command: ingest → 15 rules → screen → optional explain → manifest → audit; bad records are recorded ingestion errors; a rule exception is an UNABLE_TO_ASSESS for that one result, recorded; `--strict` re-raises.
+
+**Decision and rationale:** Option 3. A reviewer runs one thing and gets one manifest. A rejected record is a claim never checked; it is not reported as fifteen abstentions, and `evaluate.py` shows the gap. A rule exception is the mentor's "safe state": that result abstains and asks a human rather than taking down the run. CI runs `--strict`, so no such error merges unnoticed.
+
+**Data and tool permissions:** Reads the input and config; writes results, manifest, explanations and audit events. Rules receive a read-only deep copy of earlier results.
+
+**Failure behaviour:** Exit code 0 when clean, 2 when anything was rejected or any rule failed, each listed in the manifest. A run's audit events are appended in one batch at the end.
+
+**Consequences and known limitations:** In production a rule bug degrades to abstentions rather than failing loudly; the manifest's `rule_errors` must be read.
+
+**Verification evidence:** `tests/test_runner.py`, `tests/test_run_cli.py`; status accuracy 1.0 on all three public splits; the three adapters give the same results.
+
+## ADR-010 | Typed, hash-chained audit events with an anchored head
+
+Date / authors / commit: 2026-10-01 / Tammam BenBettaieb / branch `tb/audit-chain`
+
+**Context and constraint:** Phase 1 awards 10 points for an "auditable, immutable log of all checks … and system decisions". The pack's `audit.py` chains four review actions only and cannot detect truncation or deletion, as its own CLI says.
+
+**Options considered:**
+1. Use `src/audit.py` unchanged.
+2. A database with append-only permissions.
+3. Our own chain: the pack's row format and hash, typed events on the team's `"event"` key, a head anchor written after every append.
+
+**Decision and rationale:** Option 3. The pack's verifier still accepts our logs. The team's ingestion, injection and model-failure records go in unchanged. The anchor closes the truncation and deletion gap. A database adds a dependency and still needs the same tamper evidence.
+
+**Data and tool permissions:** Append only.
+
+**Failure behaviour:** `append` refuses a chain that does not verify and writes nothing if any event in a batch is invalid. `verify` raises on a broken link, on fewer events than the anchor recorded, and on a head that differs from the anchor.
+
+**Consequences and known limitations:** Tamper-evident, not immutable; single writer; production needs WORM storage and an anchor held outside the system.
+
+**Verification evidence:** `tests/test_audit_chain.py`.

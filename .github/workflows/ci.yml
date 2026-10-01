@@ -40,16 +40,22 @@ jobs:
             exit 1
           fi
 
-      # Scores the pack baseline until our runner exists (U2.6), then switches
-      # to: python -m claimguard.run --input ... --output ...
-      - name: Evaluate on development claims
+      - name: Evaluate our engine on development claims
         run: |
-          python src/run_baseline.py --input data/development/claims.jsonl --output outputs/dev_predictions.jsonl
+          python -m claimguard.run --strict --input data/development/claims.jsonl --output outputs/dev_predictions.jsonl
           python src/evaluate.py --gold data/development/expected_results.jsonl \
             --pred outputs/dev_predictions.jsonl --claims data/development/claims.jsonl \
             --output outputs/dev_metrics.json
+          python - <<'PY'
+          import json, sys
+          m = json.load(open("outputs/dev_metrics.json"))["overall"]
+          print(f"status_accuracy={m['status_accuracy']} not_implemented={m['not_implemented']} fp={m['fp']} fn={m['fn']}")
+          sys.exit(0 if m["status_accuracy"] == 1.0 and m["not_implemented"] == 0 else 1)
+          PY
 
       - uses: actions/upload-artifact@v4
         with:
           name: dev-metrics-py${{ matrix.python }}
-          path: outputs/dev_metrics.json
+          path: |
+            outputs/dev_metrics.json
+            outputs/dev_predictions.jsonl.manifest.json

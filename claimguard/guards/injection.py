@@ -112,9 +112,10 @@ _SQUASHED = {
     "role_play": ("youarenow", "newinstruction"),
 }
 
+# One alternation per family: a family matches when any of its patterns does.
 _COMPILED = {
-    "words": {f: [re.compile(p) for p in ps] for f, ps in _WORD_PATTERNS.items()},
-    "text": {f: [re.compile(p) for p in ps] for f, ps in _TEXT_PATTERNS.items()},
+    kind: {family: re.compile("|".join(f"(?:{p})" for p in patterns)) for family, patterns in table.items()}
+    for kind, table in (("words", _WORD_PATTERNS), ("text", _TEXT_PATTERNS))
 }
 
 _BASE64 = re.compile(r"[A-Za-z0-9+/_-]{16,}={0,2}")
@@ -219,11 +220,11 @@ def _families(text):
     norm = _normalize(text)
     words, squashed = _words(norm), _squashed(norm)
     found = []
-    for family, patterns in _COMPILED["words"].items():
-        if any(p.search(words) for p in patterns):
+    for family, pattern in _COMPILED["words"].items():
+        if pattern.search(words):
             found.append(family)
-    for family, patterns in _COMPILED["text"].items():
-        if family not in found and any(p.search(norm) for p in patterns):
+    for family, pattern in _COMPILED["text"].items():
+        if family not in found and pattern.search(norm):
             found.append(family)
     for family, phrases in _SQUASHED.items():
         if family not in found and any(ph in squashed for ph in phrases):
@@ -255,14 +256,15 @@ def screen(claim):
     # Split across fields. The squashed forms are joined in claim order, and
     # every ordered pair of fields is joined at its boundary, so a phrase that
     # starts in notes and ends in an attachment (notes come last in the
-    # envelope) is whole again.
+    # envelope) is whole again. All pieces go into one string separated by
+    # "|": _squashed keeps only a-z, so a separator is never part of a phrase
+    # and no match spans two pieces.
     squashed = [_squashed(_normalize(text)) for _, text in strings]
-    joined = ["".join(squashed)] + [a[-_SPAN:] + b[:_SPAN]
-                                    for i, a in enumerate(squashed) if a
-                                    for j, b in enumerate(squashed) if b and i != j]
+    haystack = "|".join(["".join(squashed)] + [a[-_SPAN:] + b[:_SPAN]
+                                               for i, a in enumerate(squashed) if a
+                                               for j, b in enumerate(squashed) if b and i != j])
     for family, phrases in _SQUASHED.items():
-        if not any(h.family == family for h in hits) \
-                and any(ph in text for text in joined for ph in phrases):
+        if not any(h.family == family for h in hits) and any(ph in haystack for ph in phrases):
             hits.append(Hit("(joined)", family, "joined"))
     cid = claim.get("claim_id") if isinstance(claim, dict) else None
     return Screening(cid if isinstance(cid, str) and _SAFE_ID.fullmatch(cid) else None, tuple(hits))

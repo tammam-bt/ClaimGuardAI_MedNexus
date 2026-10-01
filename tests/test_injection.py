@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from claimguard._pack import load_jsonl
 from claimguard.guards import screen
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -115,6 +116,18 @@ class VariantTests(unittest.TestCase):
             claim["attachments"][0]["text"] = parts["attachments"]
             hits = screen(claim).hits
             self.assertIn(("(joined)", "joined"), {(h.path, h.layer) for h in hits}, first)
+
+    def test_no_match_across_pair_boundaries(self):
+        # "you are now" exists only if two boundary pieces are glued together:
+        # the end of notes+attachment and the start of notes+another field.
+        # Searching all pieces as one string must keep them apart.
+        claim = copy.deepcopy(load_jsonl(ROOT / "examples" / "first_10_claims.jsonl")[0])
+        claim["notes"] = "p" * 30 + "now" + "p" * 18
+        claim["attachments"] = [{"attachment_id": "x" * 15 + "youare" + "q" * 30, "type": "zzzz",
+                                 "patient_id": claim["patient_id"], "service_code": "SVC-LAB",
+                                 "service_date": claim["lines"][0]["service_date"],
+                                 "document_status": "final", "text": "zzzz"}]
+        self.assertFalse(screen(claim).flagged)
 
 
 class BenignTextTests(unittest.TestCase):

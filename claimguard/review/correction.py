@@ -164,9 +164,10 @@ def correct(parent: ClaimVersion, changes: Sequence[Mapping[str, Any]], *, actor
     return _version(claim, parent.version + 1, parent, actor, reason, changes)
 
 
-def rule_engine(root: Optional[str] = None) -> Engine:
-    """All 15 results for a claim, from the package's one runner (U2.6)."""
-    return RuleEngine(root).evaluate_claim
+def rule_engine(root: Optional[str] = None, *, strict: bool = False) -> Engine:
+    """All 15 results for a claim, from the package's one runner (U2.6).
+    strict=True re-raises a rule's exception instead of reporting it."""
+    return RuleEngine(root, strict=strict).evaluate_claim
 
 
 @dataclass(frozen=True)
@@ -175,14 +176,24 @@ class Recheck:
     results: List[Dict[str, Any]]
     previous_results: List[Dict[str, Any]]
     status_changes: List[Dict[str, str]]
+    rule_errors: List[Dict[str, Any]]  # a rule that crashed on either version: its result is UNABLE_TO_ASSESS
+
+
+def _evaluate(engine: Engine, version: ClaimVersion) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """One version's results, and the rule errors the runner recorded for it."""
+    log = getattr(getattr(engine, "__self__", None), "errors", None)
+    start = len(log) if log is not None else 0
+    results = engine(version.claim)
+    errors = [{"version": version.version, "rule_id": e.rule_id, "error": e.error} for e in (log or [])[start:]]
+    return results, errors
 
 
 def recheck(parent: ClaimVersion, changes: Sequence[Mapping[str, Any]], *, actor: str, reason: str,
             engine: Engine) -> Recheck:
     """Correct, then re-run every rule on the new version and report what moved."""
     version = correct(parent, changes, actor=actor, reason=reason)
-    before, after = engine(parent.claim), engine(version.claim)
+    (before, errors_before), (after, errors_after) = _evaluate(engine, parent), _evaluate(engine, version)
     was = {r["rule_id"]: r["status"] for r in before}
     moved = [{"rule_id": r["rule_id"], "before": was[r["rule_id"]], "after": r["status"]}
              for r in after if was.get(r["rule_id"]) != r["status"]]
-    return Recheck(version, after, before, moved)
+    return Recheck(version, after, before, moved, errors_before + errors_after)

@@ -6,8 +6,9 @@ registered yet reports NOT_IMPLEMENTED, never PASS.
 A rule that raises is a bug, but one bug must not cost a whole held-out run.
 By default that result becomes UNABLE_TO_ASSESS, flagged for human review,
 and the error is recorded in Engine.errors (and from there in the run
-manifest). strict=True re-raises instead; tests and CI use it so bugs stay
-loud.
+manifest). Only the exception's type is recorded: its message can quote the
+claim, and the manifest never does. strict=True re-raises instead, with the
+full traceback; tests and CI use it so bugs stay loud.
 
 Each rule sees a read-only deep copy of the results before it (prior), so no
 rule can alter what an earlier rule reported.
@@ -64,5 +65,5 @@ class Engine:
         except Exception as e:
             if self.strict:
                 raise
-            self.errors.append(RuleError(claim["claim_id"], rule["rule_id"], f"{type(e).__name__}: {e}"))
+            self.errors.append(RuleError(claim["claim_id"], rule["rule_id"], type(e).__name__))
             return make_result(claim, rule, "UNABLE_TO_ASSESS", ["/claim_id"], RULE_ERROR_MESSAGE)

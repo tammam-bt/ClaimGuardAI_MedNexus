@@ -105,6 +105,17 @@ class RunCliTests(unittest.TestCase):
         ai = manifest_of(explained)["ai"]
         self.assertEqual((ai["summary"]["provider"], ai["model_failures"]), ("mock", []))
 
+    def test_manifest_hashes_the_files_the_run_wrote(self):
+        # The audit chain records the manifest's hash, so hashing the outputs
+        # here makes a changed results or explanations file detectable.
+        plain, explained = self.dir / "plain.jsonl", self.dir / "explained.jsonl"
+        run("--input", FIRST_10, "--output", plain)
+        run("--input", FIRST_10, "--output", explained, "--explain")
+        sha = lambda p: hashlib.sha256(Path(p).read_bytes()).hexdigest()
+        self.assertEqual(manifest_of(plain)["outputs"], {"results_sha256": sha(plain), "explanations_sha256": None})
+        self.assertEqual(manifest_of(explained)["outputs"],
+                         {"results_sha256": sha(explained), "explanations_sha256": sha(f"{explained}.explanations.jsonl")})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -10,7 +10,9 @@ from pathlib import Path
 
 from claimguard._pack import load_jsonl
 from claimguard.audit import chain
+from claimguard.engine.registry import REGISTRY
 from claimguard.review.correct import correct_claim
+from claimguard.review.correct import main as correct_main
 from claimguard.review.correction import original
 from claimguard.run import main as run_main
 from claimguard.ui import build
@@ -117,6 +119,26 @@ class CorrectionTests(RunCase):
         last = load_jsonl(self.log)[-1]["event"]
         self.assertEqual((last["event"], last["claim_id"], last["version"]), ("version_created", AUTH_CLAIM, 2))
         self.assertEqual(json.loads(out.read_text(encoding="utf-8"))["input_hash"], last["input_hash"])
+
+    def test_a_rule_error_is_recorded_and_fails_the_command(self):
+        def boom(ctx):
+            raise ZeroDivisionError("division by zero")
+
+        changes = self.dir / "fix.json"
+        changes.write_text(json.dumps(FIX), encoding="utf-8")
+        saved = REGISTRY["R009"]
+        REGISTRY["R009"] = boom
+        try:
+            with contextlib.redirect_stdout(io.StringIO()) as printed:
+                code = correct_main(["--claims", str(DEV / "claims.jsonl"), "--claim-id", AUTH_CLAIM,
+                                     "--changes", str(changes), "--actor", "Reviewer 01", "--reason", "Authorization added.",
+                                     "--output", str(self.dir / "corrections")])
+        finally:
+            REGISTRY["R009"] = saved
+        self.assertEqual(code, 2)
+        self.assertIn("R009", printed.getvalue())
+        record = json.loads((self.dir / "corrections" / f"{AUTH_CLAIM}.v2.json").read_text(encoding="utf-8"))
+        self.assertEqual({(e["rule_id"], e["error"]) for e in record["rule_errors"]}, {("R009", "ZeroDivisionError")})
 
     def test_a_refused_correction_writes_nothing(self):
         before = self.log.read_bytes()

@@ -1,4 +1,5 @@
 """Tests for U5.6 correction -> new version -> recheck (claimguard.review.correction, DEC-011)."""
+import contextlib
 import copy
 import hashlib
 import json
@@ -16,6 +17,16 @@ WHO = {"actor": "reviewer-1", "reason": "Verified against the source bill."}
 
 def canonical_hash(claim):
     return hashlib.sha256(json.dumps(claim, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+
+@contextlib.contextmanager
+def broken_rule(rule_id, fn):
+    saved = REGISTRY[rule_id]
+    REGISTRY[rule_id] = fn
+    try:
+        yield
+    finally:
+        REGISTRY[rule_id] = saved
 
 
 class CorrectionTests(unittest.TestCase):
@@ -116,6 +127,29 @@ class CorrectionTests(unittest.TestCase):
                     correct(v1, [op], **WHO)
 
     # The recheck
+
+    def test_recheck_reports_rule_errors(self):
+        # A rule that crashes gives UNABLE_TO_ASSESS; the recheck says so
+        # instead of leaving the error inside an engine nobody reads.
+        def boom(ctx):
+            raise ZeroDivisionError("division by zero")
+
+        with broken_rule("R012", boom):
+            run = recheck(original(self.base), [{"op": "replace", "path": "/total_amount", "value": 331}],
+                          engine=rule_engine(), **WHO)
+        self.assertEqual(self.status(run, "R012"), "UNABLE_TO_ASSESS")
+        self.assertEqual(run.rule_errors, [{"version": 1, "rule_id": "R012", "error": "ZeroDivisionError"},
+                                           {"version": 2, "rule_id": "R012", "error": "ZeroDivisionError"}])
+        clean = recheck(original(self.base), [{"op": "replace", "path": "/total_amount", "value": 331}],
+                        engine=self.engine, **WHO)
+        self.assertEqual(clean.rule_errors, [])
+
+    def test_strict_rule_engine_reraises(self):
+        def boom(ctx):
+            raise ZeroDivisionError("division by zero")
+
+        with broken_rule("R012", boom), self.assertRaises(ZeroDivisionError):
+            rule_engine(strict=True)(self.base)
 
     def test_recheck_reruns_every_rule_in_order(self):
         run = recheck(original(self.base), [{"op": "replace", "path": "/total_amount", "value": 331}], engine=self.engine, **WHO)

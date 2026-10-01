@@ -83,17 +83,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     injection_flags = [s.as_event() for s in map(screen, claims) if s.flagged]
     events += injection_flags
 
-    ai = None
+    ai, explanations_path = None, None
     if a.explain:
         records, failures, summary = explain_run(results, {c["claim_id"]: c for c in claims},
                                                  {r["rule_id"]: r for r in engine.cfg["rules"]})
-        _write_jsonl(f"{a.output}.explanations.jsonl", records)
+        explanations_path = f"{a.output}.explanations.jsonl"
+        _write_jsonl(explanations_path, records)
         ai = {"summary": summary, "model_failures": failures}
         events += failures
 
     manifest = build_manifest(engine=engine, run_id=run_id, ingested=ingested, accepted=accepted,
                               results=results, injection_flags=injection_flags, ai=ai,
-                              duration_ms=round((time.perf_counter() - started) * 1000))
+                              duration_ms=round((time.perf_counter() - started) * 1000),
+                              results_path=a.output, explanations_path=explanations_path)
     manifest_path = Path(a.manifest) if a.manifest else Path(f"{a.output}.manifest.json")
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

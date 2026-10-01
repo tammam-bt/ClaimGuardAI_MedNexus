@@ -23,7 +23,10 @@ def _file_sha256(path) -> str:
 
 def build_manifest(*, engine, run_id: str, ingested, accepted: Sequence[Any],
                    results: Sequence[Mapping[str, Any]], injection_flags: List[Dict[str, Any]],
-                   ai: Optional[Dict[str, Any]], duration_ms: int) -> Dict[str, Any]:
+                   ai: Optional[Dict[str, Any]], duration_ms: int,
+                   results_path, explanations_path=None) -> Dict[str, Any]:
+    """The audit chain records this manifest's hash, so hashing the output
+    files here ties them to the chain too."""
     summary = ai["summary"] if ai else {}
     return {
         "manifest_version": MANIFEST_VERSION,
@@ -38,6 +41,8 @@ def build_manifest(*, engine, run_id: str, ingested, accepted: Sequence[Any],
         "model": summary.get("model"),
         "prompt_version": summary.get("prompt_version"),
         "results": len(results),
+        "outputs": {"results_sha256": _file_sha256(results_path),
+                    "explanations_sha256": _file_sha256(explanations_path) if explanations_path else None},
         "statuses": dict(sorted(Counter(r["status"] for r in results).items())),
         "claims": [{"claim_id": item.claim["claim_id"], **item.provenance.as_dict()} for item in accepted],
         "ingestion_errors": list(ingested.errors),

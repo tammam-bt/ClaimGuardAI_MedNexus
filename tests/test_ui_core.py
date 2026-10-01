@@ -155,9 +155,16 @@ class CoreLogicTests(unittest.TestCase):
         by = {s["key"]: s for s in stages}
         self.assertEqual(by["checked"]["state"], "fail")
         self.assertEqual(by["screened"]["state"], "warn")
-        self.assertEqual(by["explained"]["summary"], "withheld from the model (flagged)")
+        # Plain words: no adapter, line number or zero count.
+        self.assertEqual(by["received"]["summary"], "Received")
+        self.assertEqual(by["checked"]["summary"], "14 passed · 1 failed")
+        self.assertEqual(by["screened"]["summary"], "Flagged for injection")
+        self.assertEqual(by["explained"]["summary"], "Withheld from the model")
         self.assertEqual(by["review"]["summary"], "0 / 1 decided")
         self.assertEqual(by["outcome"]["outcome"], "to_review")
+        clean = {s["key"]: s for s in node("Core.lifecycle(input, [])", self.entry([]))}
+        self.assertEqual(clean["screened"]["summary"], "No injection found")
+        self.assertEqual(clean["checked"]["summary"], "15 passed")
 
     def test_run_stages_match_the_claims(self):
         data = {"run": None, "rejected": [{"stage": "json"}],
@@ -165,11 +172,45 @@ class CoreLogicTests(unittest.TestCase):
         stages = {s["key"]: s for s in node("Core.runStages(input, [])", data)}
         self.assertEqual(stages["received"]["summary"], "3 records")
         self.assertEqual((stages["ingested"]["state"], stages["ingested"]["summary"]), ("warn", "2 accepted · 1 rejected"))
-        self.assertEqual(stages["checked"]["summary"], "30 results · 0 rule errors")
+        self.assertEqual(stages["checked"]["summary"], "30 checks")
+        self.assertEqual(stages["screened"]["summary"], "No injection found")
         self.assertEqual(stages["explained"]["state"], "skipped")
         self.assertEqual(stages["routed"]["summary"], "1 escalate · 0 review · 1 clear")
         self.assertEqual(stages["review"]["summary"], "0 / 1 findings decided")
         self.assertEqual(stages["outcome"]["summary"], "1 ready · 1 open")
+
+    def test_run_stages_mention_a_problem_only_when_there_is_one(self):
+        ai = {"provider": "mock", "by_source": {"provider": 495, "skipped_flagged": 4}, "failures": {}}
+        data = {"run": {"input": {"records": 2}, "rule_errors": [], "ai": {"summary": ai}}, "rejected": [],
+                "claims": [self.entry([]), self.entry([])]}
+        stages = {s["key"]: s for s in node("Core.runStages(input, [])", data)}
+        self.assertEqual(stages["ingested"]["summary"], "2 accepted")
+        self.assertEqual(stages["explained"]["summary"], "495 explained · 4 withheld")
+        data["run"]["rule_errors"] = [{"rule_id": "R003"}]
+        ai["failures"] = {"timeout": 2}
+        stages = {s["key"]: s for s in node("Core.runStages(input, [])", data)}
+        self.assertEqual(stages["checked"]["summary"], "30 checks · 1 rule error")
+        self.assertEqual((stages["explained"]["state"], stages["explained"]["summary"]),
+                         ("warn", "495 explained · 4 withheld · 2 fallbacks"))
+
+    def test_field_labels_and_plain_values(self):
+        claim = {"lines": [{"line_id": "L1"}, {"line_id": None}], "attachments": [{"attachment_id": "DOC-1"}]}
+        pointers = ["/coverage/end_date", "/lines/0/service_date", "/lines/1/net_amount", "/total_amount",
+                    "/lines", "/attachments/0/text", "/coverage/beneficiary_patient_id", ""]
+        self.assertEqual(node("input.pointers.map((p) => Core.fieldLabel(p, input.claim))", {"pointers": pointers, "claim": claim}),
+                         ["Coverage › End date", "Line L1 › Service date", "Line 2 › Net amount", "Total amount",
+                          "Service lines", "Document DOC-1 › Text", "Coverage › Beneficiary patient ID", "Claim"])
+        values = [None, "", "active", 1510, 0.5, True, [], ["a", "b"],
+                  [{"line_id": "L1", "modifier": None, "quantity": 2}], {"status": "approved", "max_quantity": 10}]
+        self.assertEqual(node("input.map(Core.plain)", values),
+                         ["—", "—", "active", "1,510", "0.5", "Yes", "None", "a, b",
+                          "L1 · Modifier: — · Quantity: 2", "Status: approved\nMax quantity: 10"])
+
+    def test_explanation_labels_are_honest(self):
+        labels = node("Object.fromEntries(Object.entries(Core.SOURCE).map(([k, v]) => [k, v.label]))", None)
+        self.assertEqual(labels["mock"], "Rule's explanation")
+        self.assertEqual(labels["provider"], "AI explanation")
+        self.assertTrue(labels["fallback"].startswith("Rule's explanation"))
 
     def test_one_date_format(self):
         self.assertEqual(node("[Core.date('2026-04-24'), Core.date(null), Core.money(1520, 'SAR'), Core.money(NaN)]", None),

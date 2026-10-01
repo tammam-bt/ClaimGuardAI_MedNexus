@@ -26,15 +26,17 @@ Every page has the same sidebar, top bar and components. A concept (a status, a 
 
 | Page | What it shows |
 |---|---|
-| **Dashboard** | The run's life cycle in eight steps (received → ingested → checked → screened → explained → routed → in review → outcome), routes, result statuses, the rules most often failing, run details, latest audit events, records rejected at ingestion |
+| **Dashboard** | The run's life cycle in eight steps (received → ingested → checked → screened → explained → routed → in review → outcome), routes, result statuses, the rules most often failing, latest audit events, records rejected at ingestion |
 | **Review Queue** | Claims routed REVIEW or ESCALATE, open ones first, most urgent route then oldest first, with the routing rules explained |
-| **Claims** | Every claim; one claim's life cycle, its 15 checks, each finding's evidence (JSON pointer and value), explanation, corrective action and the reviewer's decision, its documents, history and corrected versions |
+| **Claims** | Every claim; one claim's life cycle, its 15 checks, each finding's evidence (field and value), explanation, corrective action and the reviewer's decision, its documents, history and corrected versions |
 | **Audit Logs** | The hash chain, verified when the page was built; run events are shown to admins only |
 | **Rules** | The 15 rules of `rules/rules.json`: logic quoted from the rulebook, the policy values each one reads, this run's statuses, performance, the claims concerned. Read-only |
 | **Evaluation** | The official scorer's metrics: overall, per rule, expected-against-predicted matrix, disagreements, AI summary |
-| **Settings** | The run's configuration, read-only; the reviewer's name, role and unsent drafts |
+| **Settings** | The reviewer's name, role and unsent drafts; how findings are explained, routing, security and permissions, read-only |
 
-`#/components` (not in the navigation) shows every component in every state.
+`#/components` (not linked from any page) shows every component in every state.
+
+The page speaks a claims reviewer's language: it shows no command, file path of the run, hash or version tag, and no document citation. Run details (run ID, input hash, versions) stay in the run's manifest; the commands below live here, not in the page.
 
 ## From a decision to the audit log
 

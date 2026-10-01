@@ -18,7 +18,7 @@ registerPage({
       + (outcomes.correction_needed || 0) + (outcomes.awaiting_recheck || 0);
 
     const rules = h("details", { class: "disclosure" },
-      h("summary", { text: `How claims reach this queue (routing policy ${DATA.routing.policy_version})` }), routingRules());
+      h("summary", { text: "How claims reach this queue" }), routingRules());
 
     return h("div", { class: "stack" },
       statRow([

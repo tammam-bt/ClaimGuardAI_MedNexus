@@ -103,12 +103,23 @@ class EndToEndTests(unittest.TestCase):
 
     def test_dashboard(self):
         d = self.out["dashboard"]
-        for part in ("400 records", "400 accepted · 0 rejected", "6,000 results · 0 rule errors", "4 flagged for injection",
+        for part in ("400 records", "400 accepted", "6,000 checks", "4 flagged for injection", "495 explained · 4 withheld",
                      "201 escalate · 63 review · 136 clear", "136 ready · 264 open"):
             self.assertIn(part, d["lifecycle"])
+        # A zero is not worth a mention; the mock is not called a template.
+        for gone in ("0 rejected", "rule error", "fallback", "template", "mock"):
+            self.assertNotIn(gone, d["lifecycle"])
         self.assertIn("Routed for review264", d["stats"])
         self.assertIn("Ready for submission136", d["stats"])
         self.assertIn("No record was rejected", d["rejected"])
+        self.assertNotIn("(doc", d["rejected"])
+        # No run metadata, version tag, helper text or empty status row; a reviewer sees the chain status.
+        for gone in ("This run", "Routing policy", "Click a step", "Not implemented", "Input hash", "No event your role can see"):
+            self.assertNotIn(gone, d["page"])
+        self.assertIn("Chain valid", d["page"])
+        self.assertIn("Open audit log", d["page"])
+        self.assertNotIn("Engine", d["sidebar"])
+        self.assertNotIn("prompt", d["sidebar"])
 
     def test_rules(self):
         r = self.out["rules"]
@@ -116,8 +127,9 @@ class EndToEndTests(unittest.TestCase):
         self.assertTrue(r["rows"][2].startswith("R003 Coverage active on service date"))
         self.assertTrue(r["rows"][14].startswith("R015 Currency matches policy"))
         page = r["r013"]["page"]
-        for part in ("Quantity and price limits", "max_unit_price", "max_quantity_per_line", "EDU-BASIC 1.0.0", "Deterministic"):
+        for part in ("Quantity and price limits", "max_unit_price", "max_quantity_per_line", "EDU-BASIC", "Deterministic"):
             self.assertIn(part, page)
+        self.assertNotIn("1.0.0", page)  # no version tag on a rule or a policy
         self.assertNotIn("Failing or unassessed rule", r["r013"]["filters"])
         self.assertEqual(r["r013"]["diagonal"], ["344", "30", "26"])
         self.assertEqual(r["r013"]["offDiagonal"], 0)
@@ -127,6 +139,8 @@ class EndToEndTests(unittest.TestCase):
         self.assertIn("Valid", a["reviewer"]["page"])
         self.assertIn("6 run events hidden for your role", a["reviewer"]["page"])
         self.assertEqual(a["reviewer"]["count"], "0 of 0 events")
+        for gone in ("python -m", "Adding decisions", "view_run_events", "(doc"):
+            self.assertNotIn(gone, a["reviewer"]["page"])
         self.assertEqual(a["admin"]["count"], "6 of 6 events")
         self.assertEqual(a["admin"]["types"][0], "Run finished")
         self.assertEqual(a["admin"]["types"][-1], "Run started")
@@ -134,11 +148,14 @@ class EndToEndTests(unittest.TestCase):
     def test_settings(self):
         s = self.out["settings"]
         self.assertEqual(s["name"], "Reviewer 01")
-        self.assertIn("Routing policy1.0.0", s["stats"])
-        self.assertIn("Explanationsmock", s["stats"])
-        self.assertIn("mock (no model is wired yet)", s["page"])
-        self.assertNotIn("sk-ant", s["page"])
-        rows = {r[0].split("  ")[0]: r[1:] for r in s["rbacRows"]}
+        self.assertIsNone(s["stats"])  # no tile row of versions and module names
+        self.assertIn("AI explainer not enabled. Findings use the rule's own explanation.", s["page"])
+        self.assertIn("Permissions are checked when decisions are added to the audit log.", s["page"])
+        self.assertIn("Your name is recorded with each decision.", s["page"])
+        for gone in ("sk-ant", "claimguard.", "python -m", "ANTHROPIC_API_KEY", ".env", "1.0.0", "Run and versions",
+                     "component reference", "(doc", "view_claim", "mark_corrected_for_recheck"):
+            self.assertNotIn(gone, s["page"])
+        rows = {r[0]: r[1:] for r in s["rbacRows"]}  # plain action names, no code identifier beside them
         self.assertEqual(rows["Dismiss with reason"], ["Allowed", "Allowed"])
         self.assertEqual(rows["See run events (runs, rejections, flags, model failures)"], ["Not allowed", "Allowed"])
         self.assertTrue(s["confirmShown"])
@@ -149,8 +166,10 @@ class EndToEndTests(unittest.TestCase):
         self.assertIn("Status accuracy100.0%", e["stats"])
         self.assertIn("Claims fully correct400 / 400", e["stats"])
         self.assertIn("No disagreement", e["page"])
-        self.assertIn("Template text (mock, no model): 495", e["page"])
+        self.assertIn("Rule's explanation: 495", e["page"])
         self.assertNotIn("AI explanation: 495", e["page"])
+        for gone in ("python -m", "(doc", "Doc 07", "Prompt", "null", "Not impl."):
+            self.assertNotIn(gone, e["page"])
         self.assertEqual(self.out["hostile"]["mismatchRows"], 1)
 
     def test_review_queue(self):
@@ -162,6 +181,18 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(o["queueAfter"]["count"], "263 of 264 claims")
         self.assertEqual(o["queueAfter"]["drafts"], "2")
         self.assertEqual(o["queueAll"], "264 of 264 claims")
+
+    def test_claim_page_speaks_a_reviewers_language(self):
+        page = self.out["claimPage"]
+        # The engine's text once, with one honest label; evidence by field name.
+        self.assertIn("Rule's explanation", page)
+        self.assertIn("Coverage › End date", page)
+        for gone in ("Deterministic", "JSON pointer", "/coverage/", "Template text", "No model is wired", "Explanation for the reviewer",
+                     "Provenance", "Record hash", "Routing policy", "python -m", "(doc", "Click a step", "jsonl · line"):
+            self.assertNotIn(gone, page)
+        self.assertIn("Set your name", self.out["sidebarUserBefore"])
+        self.assertNotIn("Name not set", self.out["sidebarUserBefore"])
+        self.assertNotIn("?", self.out["sidebarUserBefore"])
 
     def test_drafts_have_the_audit_format(self):
         required = {"event", "claim_id", "rule_id", "action", "actor", "reason", "created_at", "original_status", "input_hash"}

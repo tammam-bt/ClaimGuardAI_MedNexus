@@ -58,7 +58,7 @@ registerPage({
 
       sample ? card({ title: "Check grid", meta: sample.claim.claim_id, body: checkGrid(sample.results) }) : null,
 
-      fail ? card({ title: "Evidence table", meta: `${fail.rule_id} on ${fail.claim_id}`, body: evidenceTable(fail.evidence) }) : null,
+      fail ? card({ title: "Evidence table", meta: `${fail.rule_id} on ${fail.claim_id}`, body: evidenceTable(fail.evidence, sample.claim) }) : null,
 
       card({ title: "Bars", body: bars(Core.ROUTE_ORDER.map((r) => ({
         label: Core.ROUTE[r].label, value: CLAIMS.filter((c) => c.route.route === r).length, tone: Core.ROUTE[r].tone }))) }),

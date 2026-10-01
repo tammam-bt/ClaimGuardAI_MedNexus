@@ -7,24 +7,13 @@ const Shell = (function () {
   const title = h("h1");
   const subtitle = h("p");
   const content = h("main", { class: "content", id: "content", tabindex: "-1" });
-  const userName = h("span", { class: "sidebar__user-name" });
-  const userRole = h("span", { class: "sidebar__user-role" });
-  const avatar = h("span", { class: "avatar", "aria-hidden": "true" });
+  const userBlock = h("div", { class: "sidebar__user" });
   let current = null;
   let firstRender = true;
 
   function openCount() {
     const events = decisions();
     return CLAIMS.filter((c) => Core.outcome(c, events) !== "ready").length;
-  }
-
-  function runCard() {
-    if (!DATA.run) return h("div", { class: "sidebar__run" }, h("strong", { text: "No run manifest" }));
-    const r = DATA.run;
-    return h("div", { class: "sidebar__run" },
-      h("div", {}, "Run ", h("strong", { class: "mono", text: Core.shortHash(r.run_id) })),
-      h("div", {}, `${Core.number(r.input.accepted)} claims · ${r.input.adapter}`),
-      h("div", {}, `Engine ${r.engine.version} · prompt ${r.prompt_version || "—"}`));
   }
 
   function sidebar() {
@@ -40,8 +29,7 @@ const Shell = (function () {
       h("div", { class: "brand" }, icon("logo"),
         h("div", {}, h("div", { class: "brand__name", text: "ClaimGuard AI" }),
           h("div", { class: "brand__tag", text: "Claim pre-validation" }))),
-      nav, runCard(),
-      h("div", { class: "sidebar__user" }, avatar, h("div", {}, userName, h("div", {}, userRole))));
+      nav, userBlock);
   }
 
   function topbarSearch() {
@@ -67,9 +55,11 @@ const Shell = (function () {
 
   function refreshUser() {
     const name = State.reviewer.trim();
-    userName.textContent = name || "Name not set";
-    userRole.textContent = State.role === "admin" ? "Admin" : "Reviewer";
-    avatar.textContent = name ? name.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase() : "?";
+    const role = h("div", { class: "sidebar__user-role", text: State.role === "admin" ? "Admin" : "Reviewer" });
+    fill(userBlock, name
+      ? [h("span", { class: "avatar", "aria-hidden": "true", text: name.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase() }),
+        h("div", {}, h("span", { class: "sidebar__user-name", text: name }), role)]
+      : h("div", {}, h("a", { class: "sidebar__user-link", href: href("settings", null, { focus: "name" }), text: "Set your name" }), role));
     const q = navLinks.get("queue");
     if (q && q.count) q.count.textContent = Core.number(openCount());
   }

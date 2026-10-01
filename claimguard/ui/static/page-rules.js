@@ -41,15 +41,15 @@ const RulesPage = (function () {
       caption: "Policy values this rule reads", rows: fields,
       columns: [
         { key: "field", label: "Field", render: (k) => h("span", { class: "mono", text: k }) },
-        ...policies.map((p) => ({ key: p.policy_id, label: `${p.policy_id} ${p.version}`, render: (k) => policyValue(p[k]) })),
+        ...policies.map((p) => ({ key: p.policy_id, label: p.policy_id, render: (k) => policyValue(p[k]) })),
       ] }) });
   }
 
   function performanceCard(ruleId) {
     const m = metricsFor(ruleId);
     if (!m) {
-      return card({ title: "Performance", body: emptyState({ icon: "bar-chart", title: "No expected results given",
-        text: "Pass --gold to claimguard.ui to score this run against the expected results." }) });
+      return card({ title: "Performance", body: emptyState({ icon: "bar-chart", title: "Not scored",
+        text: "Expected results weren't loaded, so this run isn't scored." }) });
     }
     return card({ title: "Performance", meta: "Official scorer", body: h("div", { class: "stack" },
       kv([
@@ -97,7 +97,6 @@ const RulesPage = (function () {
           { key: "na", label: "N/A", num: true, sort: (x) => x.counts.NOT_APPLICABLE, render: (x) => Core.number(x.counts.NOT_APPLICABLE) },
           { key: "acc", label: "Status accuracy", num: true, sort: (x) => (x.m ? x.m.status_accuracy : -1),
             render: (x) => (x.m ? Core.percent(x.m.status_accuracy) : "—") },
-          { key: "version", label: "Version", render: (x) => h("span", { class: "mono small", text: x.rule.version }) },
         ] }) }));
   }
 
@@ -119,9 +118,8 @@ const RulesPage = (function () {
           next ? linkButton({ href: href("rules", next.rule_id), label: next.rule_id, icon: "chevron-right" }) : null)),
       h("div", { class: "claim-head" },
         h("div", { class: "claim-head__title" }, h("h2", { text: rule.rule_id }), h("span", { class: "card__title", text: rule.title })),
-        h("div", { class: "row" }, severityBadge(rule.severity), methodBadge(),
-          rule.implemented === false ? statusBadge("NOT_IMPLEMENTED") : null,
-          badge(rule.source, { tone: "neutral" }))),
+        h("div", { class: "row" }, severityBadge(rule.severity, { long: true }), methodBadge(),
+          rule.implemented === false ? statusBadge("NOT_IMPLEMENTED") : null)),
       h("div", { class: "grid grid--main-side" },
         h("div", { class: "stack" },
           card({ title: "Rule logic", meta: "Quoted from the rulebook", body: h("div", { class: "stack" },
@@ -129,9 +127,7 @@ const RulesPage = (function () {
             h("div", { class: "finding__section" }, h("span", { class: "label", text: "Corrective action" }), h("p", { text: rule.corrective_action }))) }),
           policyCard(ruleId)),
         h("div", { class: "stack" },
-          card({ title: "This run", meta: `${Core.number(CLAIMS.length)} claims`, body: bars(Core.STATUS_ORDER.map((s) => ({
-            label: Core.STATUS[s].label, value: counts[s],
-            tone: { fail: "fail", unknown: "unknown", pass: "pass", neutral: "neutral" }[Core.STATUS[s].tone] }))) }),
+          card({ title: "This run", meta: `${Core.number(CLAIMS.length)} claims`, body: bars(statusBars(counts)) }),
           performanceCard(ruleId))),
       matrixCard(ruleId),
       card({ title: "Claims with a finding on this rule", meta: Core.plural(concerned.length, "claim"), flush: !!concerned.length,

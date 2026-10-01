@@ -12,22 +12,51 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const [chromePath, pagePath, hostilePath] = process.argv.slice(2);
-const profile = mkdtempSync(join(tmpdir(), "cg-e2e-"));
-const chrome = spawn(chromePath, ["--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
-  "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--window-size=1440,1000", "about:blank"]);
 
-const wsUrl = await new Promise((resolve, reject) => {
-  let buf = "";
-  const timer = setTimeout(() => reject(new Error("Chrome did not start")), 20000);
-  chrome.stderr.on("data", (d) => {
-    buf += d;
-    const m = buf.match(/DevTools listening on (ws:\/\/\S+)/);
-    if (m) { clearTimeout(timer); resolve(m[1]); }
-  });
-});
+// Start Chrome and connect to it. A busy CI runner can be slow to start a
+// browser, so this waits up to a minute and tries twice. If Chrome still does
+// not start, the result says so instead of being empty.
+async function launch() {
+  const profile = mkdtempSync(join(tmpdir(), "cg-e2e-"));
+  const chrome = spawn(chromePath, ["--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
+    "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--window-size=1440,1000", "about:blank"]);
+  try {
+    const wsUrl = await new Promise((resolve, reject) => {
+      let buf = "";
+      const timer = setTimeout(() => reject(new Error("no DevTools address within 60 s")), 60000);
+      chrome.once("error", (e) => { clearTimeout(timer); reject(e); });
+      chrome.once("exit", (code) => { clearTimeout(timer); reject(new Error(`Chrome exited with code ${code}`)); });
+      chrome.stderr.on("data", (d) => {
+        buf += d;
+        const m = buf.match(/DevTools listening on (ws:\/\/\S+)/);
+        if (m) { clearTimeout(timer); resolve(m[1]); }
+      });
+    });
+    const ws = new WebSocket(wsUrl);
+    await new Promise((resolve, reject) => {
+      ws.addEventListener("open", resolve, { once: true });
+      ws.addEventListener("error", () => reject(new Error("could not connect to DevTools")), { once: true });
+    });
+    return { chrome, ws, profile };
+  } catch (e) {
+    chrome.kill();
+    try { rmSync(profile, { recursive: true, force: true }); } catch (_) { /* Chrome may still hold files */ }
+    throw e;
+  }
+}
 
-const ws = new WebSocket(wsUrl);
-await new Promise((r) => ws.addEventListener("open", r, { once: true }));
+let chrome, ws, profile;
+for (let attempt = 1; !ws; attempt++) {
+  try {
+    ({ chrome, ws, profile } = await launch());
+  } catch (e) {
+    if (attempt === 2) {
+      process.stdout.write(JSON.stringify({ failure: `Chrome did not start: ${e.message}` }));
+      process.exit(0);
+    }
+  }
+}
+
 let nextId = 0;
 const pending = new Map();
 const errors = [];
@@ -53,12 +82,8 @@ function send(method, params = {}, sessionId) {
   return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
 }
 
-const { targetId } = await send("Target.createTarget", { url: "about:blank" });
-const { sessionId } = await send("Target.attachToTarget", { targetId, flatten: true });
+let sessionId;  // set at the start of the run below, inside its try
 const page = (method, params) => send(method, params, sessionId);
-await page("Runtime.enable");
-await page("Page.enable");
-await page("Network.enable");
 
 // Accessibility problems on the current page, as short descriptions.
 const A11Y = `(() => {
@@ -109,6 +134,12 @@ const text = (sel) => evaluate(`(document.querySelector(${JSON.stringify(sel)}) 
 
 const out = { errors, network };
 try {
+  const { targetId } = await send("Target.createTarget", { url: "about:blank" });
+  ({ sessionId } = await send("Target.attachToTarget", { targetId, flatten: true }));
+  await page("Runtime.enable");
+  await page("Page.enable");
+  await page("Network.enable");
+
   // ---- every page draws
   await open(pagePath, "#/dashboard");
   out.pages = {};

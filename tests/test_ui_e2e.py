@@ -36,6 +36,7 @@ class EndToEndTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls._tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls._tmp.cleanup)  # runs even when setUpClass raises
         tmp = Path(cls._tmp.name)
         results, audit = tmp / "pred.jsonl", tmp / "audit.jsonl"
         with contextlib.redirect_stdout(io.StringIO()):
@@ -55,12 +56,15 @@ class EndToEndTests(unittest.TestCase):
         hostile_page.write_text(render(hostile), encoding="utf-8")
 
         done = subprocess.run([NODE, str(ROOT / "tests" / "ui_e2e.mjs"), CHROME, str(page), str(hostile_page)],
-                              capture_output=True, text=True, encoding="utf-8", timeout=240)
-        cls.out = json.loads(done.stdout or "{}")
-
-    @classmethod
-    def tearDownClass(cls):
-        cls._tmp.cleanup()
+                              capture_output=True, text=True, encoding="utf-8", timeout=300)
+        # No result at all, or one that stopped before the first page, is one
+        # clear error here instead of a KeyError in every test.
+        try:
+            cls.out = json.loads(done.stdout)
+        except ValueError:
+            raise RuntimeError(f"ui_e2e.mjs printed no result (exit {done.returncode}): {done.stderr.strip()[-2000:]}") from None
+        if "pages" not in cls.out:
+            raise RuntimeError(f"the browser run stopped before the first page: {cls.out.get('failure')}")
 
     def test_the_run_completed(self):
         self.assertNotIn("failure", self.out, self.out.get("failure"))
@@ -214,6 +218,17 @@ class EndToEndTests(unittest.TestCase):
         self.assertFalse(h["pwned"])
         self.assertEqual(h["injectedImages"], 0)
         self.assertTrue(h["shownAsText"])
+
+
+
+@unittest.skipUnless(NODE, "needs Node")
+class DriverTests(unittest.TestCase):
+    def test_a_browser_that_cannot_start_is_reported(self):
+        # A CI runner where Chrome is slow or missing must give one clear
+        # verdict, not an empty result that every test then trips over.
+        done = subprocess.run([NODE, str(ROOT / "tests" / "ui_e2e.mjs"), str(ROOT / "no-such-chrome"), "a.html", "b.html"],
+                              capture_output=True, text=True, encoding="utf-8", timeout=120)
+        self.assertIn("Chrome did not start", json.loads(done.stdout)["failure"])
 
 
 if __name__ == "__main__":

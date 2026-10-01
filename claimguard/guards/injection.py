@@ -40,6 +40,7 @@ import codecs
 import html
 import re
 import unicodedata
+from collections import defaultdict
 from dataclasses import dataclass
 from urllib.parse import unquote
 
@@ -243,6 +244,12 @@ def _strings(value, path=""):
             yield from _strings(v, f"{path}/{i}")
 
 
+def _across(ends, starts):
+    """True when one field ends with the first part and a different field
+    starts with the rest."""
+    return bool(ends) and bool(starts) and (len(ends) > 1 or len(starts) > 1 or ends != starts)
+
+
 def screen(claim):
     """Scan every string in claim. Never modifies claim."""
     hits, seen = [], set()
@@ -253,18 +260,23 @@ def screen(claim):
                 if (path, family) not in seen:
                     seen.add((path, family))
                     hits.append(Hit(path, family, layer))
-    # Split across fields. The squashed forms are joined in claim order, and
-    # every ordered pair of fields is joined at its boundary, so a phrase that
-    # starts in notes and ends in an attachment (notes come last in the
-    # envelope) is whole again. All pieces go into one string separated by
-    # "|": _squashed keeps only a-z, so a separator is never part of a phrase
-    # and no match spans two pieces.
+    # Split across fields. The squashed forms are joined in claim order, and a
+    # phrase may also start at the end of any field and finish at the start of
+    # any other, in either order (notes come last in the envelope, so a phrase
+    # from notes into an attachment is out of claim order). Every field's
+    # suffixes and prefixes up to _SPAN are indexed once, so this stays linear
+    # in the number of fields instead of pairing each field with every other.
     squashed = [_squashed(_normalize(text)) for _, text in strings]
-    haystack = "|".join(["".join(squashed)] + [a[-_SPAN:] + b[:_SPAN]
-                                               for i, a in enumerate(squashed) if a
-                                               for j, b in enumerate(squashed) if b and i != j])
+    joined = "".join(squashed)
+    ends, starts = defaultdict(set), defaultdict(set)
+    for i, s in enumerate(squashed):
+        for k in range(1, min(len(s), _SPAN) + 1):
+            ends[s[-k:]].add(i)
+            starts[s[:k]].add(i)
     for family, phrases in _SQUASHED.items():
-        if not any(h.family == family for h in hits) and any(ph in haystack for ph in phrases):
+        if not any(h.family == family for h in hits) and any(
+                ph in joined or any(_across(ends.get(ph[:k]), starts.get(ph[k:])) for k in range(1, len(ph)))
+                for ph in phrases):
             hits.append(Hit("(joined)", family, "joined"))
     cid = claim.get("claim_id") if isinstance(claim, dict) else None
     return Screening(cid if isinstance(cid, str) and _SAFE_ID.fullmatch(cid) else None, tuple(hits))

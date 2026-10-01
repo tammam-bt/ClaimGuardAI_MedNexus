@@ -11,25 +11,20 @@ The original is never edited and results are never patched: a correction
 creates a new version, and all 15 rules re-run on it. The version lives beside
 the claim, not in it, because validate_transport() rejects any extra key.
 
-Stand-ins until Role 1 ships its units (DEC-011):
-  rule_engine()  runs the registered rules until the runner (U2.6) exists;
+Role 1 pieces this module relies on (DEC-011):
+  rule_engine()  delegates to claimguard.engine.runner, the package's one runner (U2.6);
   input_hash     hashes canonical JSON, not the original file bytes (U1.5);
-  record()       is returned for the audit trail, not written to it: the pack's
-                 audit.append() accepts only the four review actions (U4.4).
+  record()       is a version_created payload: chain.append(log, [{"event": "version_created", **v.record()}], anchor) (U4.5).
 """
 import copy
 import hashlib
 import json
 import re
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
-import claimguard.rules  # noqa: F401  registers every rule module
-from claimguard._pack import config, make_result, validate_transport
-from claimguard.engine.context import RuleContext
-from claimguard.engine.policy import PolicyBook
-from claimguard.engine.registry import REGISTRY
+from claimguard._pack import validate_transport
+from claimguard.engine.runner import Engine as RuleEngine
 
 Engine = Callable[[Mapping[str, Any]], List[Dict[str, Any]]]
 
@@ -170,27 +165,8 @@ def correct(parent: ClaimVersion, changes: Sequence[Mapping[str, Any]], *, actor
 
 
 def rule_engine(root: Optional[str] = None) -> Engine:
-    """All 15 results for a claim, in rules.json order, from the registered rules.
-
-    Stand-in for Role 1's runner (U2.6): an unregistered rule reports
-    NOT_IMPLEMENTED, never PASS. prior carries earlier results, as
-    RuleContext documents.
-    """
-    cfg = config(root or Path(__file__).resolve().parents[2])
-    book = PolicyBook(cfg["policies"])
-
-    def run(claim: Mapping[str, Any]) -> List[Dict[str, Any]]:
-        prior: Dict[str, Dict[str, Any]] = {}
-        for rule in cfg["rules"]:
-            fn = REGISTRY.get(rule["rule_id"])
-            if fn is None:
-                result = make_result(claim, rule, "NOT_IMPLEMENTED", [], "Student implementation required.")
-            else:
-                v = fn(RuleContext(claim, rule, book.resolve(claim["policy_id"]), cfg["services"], dict(prior)))
-                result = make_result(claim, rule, v.status, v.paths, v.message, list(v.line_ids))
-            prior[rule["rule_id"]] = result
-        return list(prior.values())
-    return run
+    """All 15 results for a claim, from the package's one runner (U2.6)."""
+    return RuleEngine(root).evaluate_claim
 
 
 @dataclass(frozen=True)

@@ -2,6 +2,14 @@
 
 Record any clarification or disagreement about a rule **before** changing expected behaviour (docs/09). One entry per question.
 
+## Open questions for the mentor
+
+1. Can a held-out claim fall outside `claim.schema.json` — contain NaN or Infinity (DEC-003), or a date that is not `YYYY-MM-DD` (DEC-010)? If so, what are its expected results? A rejected claim produces no results, so the scorer would report missing pairs.
+2. Should a high-severity UNABLE_TO_ASSESS escalate like a FAIL, and should dismissing a high-severity finding need a second reviewer (DEC-004)?
+3. Where does "route low-confidence or high-severity cases for explicit human approval" come from? It is not in the starter pack.
+4. Is it acceptable that exercise notes (`untrusted_note`) never reach the model, by design?
+5. Please confirm each "team decision" in DEC-001 to DEC-012.
+
 ## DEC-000 | Template
 
 - **Date / author:**
@@ -137,8 +145,8 @@ Record any clarification or disagreement about a rule **before** changing expect
 - **Question:** "Compare ISO dates at day precision." The pack's `valid_date()` is `date.fromisoformat()`, which Python 3.11 widened: on 3.12 it accepts `20260525` and week dates such as `2026-W21-1` (= 2026-05-18); on 3.10 it rejects both. CI runs 3.10 and 3.12, and `pyproject.toml` allows `>=3.10`.
 - **Smallest example:** any claim with `lines[0].service_date` set to `20260525`. On 3.10 `validate_transport()` rejects it as "Invalid service date" (an ingestion error); on 3.12 it is accepted and every date rule treats it as 2026-05-25.
 - **Expected (gold) vs our reading:** All 600 public claims use `YYYY-MM-DD`, so the gold is silent and both versions score identically today. The claim schema's `"format": "date"` (RFC 3339 full-date) suggests only `YYYY-MM-DD` is valid.
-- **Resolution:** Open, not changed. `valid_date()` and `validate_transport()` are pack code (`src/`, never touch), and a stricter parser in our rules alone would make them disagree with the pack's R003, R006 and transport check on the same claim. Options for the team: (a) run the held-out evaluation on Python 3.10, or (b) reject non-`YYYY-MM-DD` dates once, at ingestion (Role 5, U1.6), so every rule sees the same input on every version. We prefer (b). To raise with the mentor: which date formats can held-out claims contain?
-- **Change made:** none yet.
+- **Resolution:** Resolved (option b), 2026-10-01: `claimguard/ingest/contract.py` accepts only YYYY-MM-DD calendar dates, matching the claim schema's `"format": "date"`, before any rule runs, so Python 3.10 and 3.12 see identical input. Kept as open question 1 for the mentor.
+- **Change made:** `claimguard/ingest/contract.py` (PR #15).
 
 ## DEC-011 | U5.6 correction → new version → recheck
 
@@ -153,7 +161,7 @@ Record any clarification or disagreement about a rule **before** changing expect
   - **Refused before any version exists:** a blank actor or reason (docs/10 requires both), a correction that changes nothing (the same hash: a decision alone cannot change a result), and a corrected claim that fails `validate_transport()` (a malformed correction is an ingestion error, never a version).
   - **All 15 rules re-run, in rules.json order, on the new version; old results are never patched.** Selective re-runs are unsafe: removing one line changes R006, R007, R009, R010, R012 and R014 at once. The recheck reports every status change against the parent version.
   - **Review decisions do not carry over to a new version.** `schemas/review_event.schema.json` has no version field, so today `claimguard/review/routing.py`'s `outstanding()` only drops a decision whose `original_status` changed. A decision made on v1 for a finding whose status is unchanged in v2 would still count. Closing this needs a version on review events (Role 1, U4.4/U4.5).
-- **Resolution:** Team decision, to confirm with the mentor. Stand-ins until Role 1 ships its pieces: `rule_engine()` runs the registered rules (and reports the rest NOT_IMPLEMENTED) until the runner (U2.6) exists; `input_hash` hashes canonical JSON, not the original file bytes (U1.5); the version record is returned, not written to the audit chain, since `src/audit.py` only accepts the four review actions (U4.4).
+- **Resolution:** Team decision, to confirm with the mentor. Stand-ins until Role 1 ships its pieces: `rule_engine()` runs the registered rules (and reports the rest NOT_IMPLEMENTED) until the runner (U2.6) exists; `input_hash` hashes canonical JSON, not the original file bytes (U1.5); the version record is returned, not written to the audit chain, since `src/audit.py` only accepts the four review actions (U4.4). Stand-ins resolved 2026-10-01: `rule_engine()` delegates to the one runner (`claimguard.engine.runner`); the run manifest records each accepted claim's original-bytes SHA-256 from `claimguard.ingest`; version records are appended as `version_created` events by `claimguard.audit.chain`, and `review_decision` events carry `input_hash`.
 - **Change made:** `claimguard/review/correction.py`, `tests/test_correction.py`.
 
 ## DEC-012 | Hostile inputs the transport check lets through

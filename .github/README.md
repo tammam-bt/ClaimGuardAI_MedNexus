@@ -65,24 +65,39 @@ python -m claimguard.evaluation.confusion --gold data/development/expected_resul
 # Route each claim: ESCALATE, REVIEW or CLEAR
 python -m claimguard.review.routing --input outputs/dev_predictions.jsonl --output outputs/dev_routing.jsonl
 
-# Review page (from the starter pack)
-python src/make_review.py --input outputs/dev_predictions.jsonl --output outputs/review.html
-
 # Verify the audit log, against its anchored head; the pack's verifier accepts it too
 python -m claimguard.audit.chain --log outputs/audit.jsonl
 python src/audit.py --verify --log outputs/audit.jsonl
 ```
 
+## Review interface
+
+One HTML page for the claims reviewer, built from a run's outputs. It works offline: no server, no key, and it loads and sends nothing.
+
+```bash
+python -m claimguard.ui --results outputs/dev_predictions.jsonl --claims data/development/claims.jsonl \
+  --audit-log outputs/audit.jsonl --gold data/development/expected_results.jsonl
+```
+
+Open `outputs/claimguard.html`. It has seven pages: Dashboard, Review Queue, Claims, Audit Logs, Rules, Evaluation and Settings. On a claim, the reviewer decides each finding (confirm, dismiss with a reason, request information, or corrected and recheck) and downloads the decisions. `python -m claimguard.ui.decisions` checks every decision and appends them to the audit chain. `python -m claimguard.review.correct` turns a correction into a new version of the claim and runs all 15 rules on it. `--gold` adds the Evaluation page; leave it out for claims without expected results.
+
+Commands, options, roles and the page's security: [docs/INTERFACE.md](../docs/INTERFACE.md).
+
 ## What each output is
 
 | File | One line per | Read by |
 |---|---|---|
-| `dev_predictions.jsonl` | claim × rule result (the scored file) | `evaluate.py`, routing, review page; never written by the AI |
-| `dev_predictions.jsonl.manifest.json` | the run: input and record hashes, provenance, rule and policy versions, ingestion errors, rule errors, injection flags, AI summary | a reviewer, the audit log |
+| `dev_predictions.jsonl` | claim × rule result (the scored file) | `evaluate.py`, routing, the interface; never written by the AI |
+| `dev_predictions.jsonl.manifest.json` | the run: input and record hashes, provenance, rule and policy versions, ingestion errors, rule errors, injection flags, AI summary, and the SHA-256 of the results and explanations files | a reviewer, the audit log |
 | `dev_predictions.jsonl.explanations.jsonl` | FAIL / UNABLE_TO_ASSESS result: `source` = `provider`, `fallback` or `skipped_flagged` | the reviewer |
 | `audit.jsonl`, `audit.head.json` | event in the hash chain; the anchored head | `claimguard.audit.chain`, `src/audit.py` |
 
-No output quotes untrusted text from a claim or a rejected model answer.
+Results quote claim values as evidence, exactly as the pack's result contract requires, and the interface shows them as text, never as HTML. Nothing else the run writes quotes a claim's notes or document text, or a rejected model answer:
+
+- an ingestion error names its stage and a schema field;
+- an injection flag names a field and a pattern family;
+- a rule error records only its exception type;
+- a model failure records only its reason.
 
 ## Settings
 
@@ -100,7 +115,7 @@ Copy `.env.example` to a file named exactly `.env` (the only name `.gitignore` c
 |---|---|
 | Tammam BenBettaieb | Role 1 · spine and audit · team lead |
 | Malak Ben Othmane | Role 2 · identity and catalogue rules (R002, R004, R005, R011, R015) |
-| Mohammed Aziz Kadri | Role 3 · money rules (R007, R012, R013), routing, evaluation |
+| Mohammed Aziz Kadri | Role 3 · money rules (R007, R012, R013), routing, evaluation, review interface |
 | Aymen Zahmoul | Role 4 · authorization and document rules (R008, R009, R010, R014), correction workflow |
 | Kacem Barhoumi | Role 5 · ingestion, guards, AI explainer |
 
@@ -110,8 +125,9 @@ Roles 4 and 5 were committed from Mohammed Aziz Kadri's account (PRs #14 and #15
 
 | Path | What |
 |---|---|
-| `claimguard/` | Our code: `engine/`, `rules/`, `ingest/`, `guards/`, `ai/`, `review/`, `evaluation/`, `audit/`, `run.py` |
+| `claimguard/` | Our code: `engine/`, `rules/`, `ingest/`, `guards/`, `ai/`, `review/`, `evaluation/`, `audit/`, `ui/`, `run.py` |
 | `src/`, `data/`, `rules/`, `schemas/`, … | The starter pack, byte-identical to tag `pack-v1.0.0` (the root `README.md` is the pack's) |
 | `docs/ARCHITECTURE.md` | Architecture, trust boundaries, data flow, limitations |
+| `docs/INTERFACE.md` | The review interface: pages, decisions, corrections, security |
 | `docs/ARCHITECTURE_DECISIONS.md` · `docs/DECISIONS.md` | Engineering decisions · rule clarifications and open mentor questions |
 | `CONTRIBUTING.md` | How the team works |

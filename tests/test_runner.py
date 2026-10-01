@@ -90,6 +90,12 @@ class EngineTests(unittest.TestCase):
         with swap_rule("R016", lambda ctx: None), self.assertRaises(RuntimeError):
             Engine(ROOT)
 
+    def test_correction_uses_the_one_runner(self):
+        from claimguard.review.correction import rule_engine
+        run = rule_engine()
+        self.assertIsInstance(run.__self__, Engine)
+        self.assertEqual(run(self.claims[0]), Engine(ROOT).evaluate_claim(self.claims[0]))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -26,40 +26,20 @@ const Dashboard = (function () {
       ] });
   }
 
-  function runCard() {
-    const r = DATA.run;
-    if (!r) {
-      return card({ title: "This run", body: emptyState({ icon: "layers", title: "No run manifest",
-        text: "Run python -m claimguard.run, which writes <output>.manifest.json beside the results." }) });
-    }
-    const implemented = Object.values(r.rules).filter((x) => x.implemented).length;
-    const ai = r.ai ? r.ai.summary : null;
-    return card({ title: "This run", body: kv([
-      ["Run", h("span", { class: "mono small", text: Core.shortHash(r.run_id), title: r.run_id })],
-      ["Input", h("span", { class: "mono small", text: r.input.source })],
-      ["Adapter", `${r.input.adapter} ${r.input.adapter_version}`],
-      ["Input hash", h("span", { class: "mono small", text: Core.shortHash(r.input.source_sha256), title: r.input.source_sha256 })],
-      ["Rules", `${implemented} of ${Object.keys(r.rules).length} implemented`],
-      ["Policies", Object.entries(r.policies).map(([k, v]) => `${k} ${v}`).join(" · ")],
-      ["Engine", `${r.engine.name} ${r.engine.version} · Python ${r.python}`],
-      ["Explanations", ai ? `${ai.provider}${ai.model ? " · " + ai.model : " (no model)"} · prompt ${ai.prompt_version}` : "Not run"],
-      ["Duration", `${(r.duration_ms / 1000).toFixed(1)} s`],
-    ]) });
-  }
-
   function eventsCard() {
     if (!DATA.audit) {
-      return card({ title: "Latest audit events", body: emptyState({ icon: "history", title: "No audit log given",
-        text: "Pass --audit-log to claimguard.run and claimguard.ui." }) });
+      return card({ title: "Latest audit events", body: emptyState({ icon: "history", title: "No audit log",
+        text: "No audit log was loaded for this run." }) });
     }
+    // A reviewer does not see run events: the card then shows the chain's
+    // status and the way to the log, nothing that reads as missing.
     const latest = DATA.audit.events.filter((row) => canSeeEvent(row.event)).slice(-5).reverse();
     return card({ title: "Latest audit events",
-      actions: linkButton({ href: href("audit"), label: "Audit log", icon: "arrow-right", variant: "ghost" }),
+      actions: linkButton({ href: href("audit"), label: "Open audit log", icon: "arrow-right", variant: "ghost" }),
       body: h("div", { class: "stack" },
         h("div", { class: "row" }, DATA.audit.valid
-          ? badge(`Chain valid · ${Core.plural(DATA.audit.count, "event")}`, { tone: "pass", icon: "lock" })
+          ? badge(`Chain valid · ${Core.plural(Core.number(DATA.audit.count), "event")}`, { tone: "pass", icon: "lock" })
           : badge("Chain INVALID", { tone: "fail", icon: "alert-triangle" })),
-        latest.length ? null : h("p", { class: "muted small", text: "No event your role can see yet. Run events are visible to admins." }),
         latest.map((row) => {
           const e = row.event || {};
           const t = Core.EVENT[e.event] || { label: String(e.event), icon: "info", tone: "neutral" };
@@ -82,7 +62,7 @@ const Dashboard = (function () {
           { key: "source", label: "Source", render: (e) => h("span", { class: "mono small", text: e.provenance.source }) },
         ] })
         : emptyState({ icon: "file-check", title: "No record was rejected",
-          text: "Every record passed the ingestion contract. A rejected record is reported here, never dropped silently (doc 03)." }) });
+          text: "Every record passed the ingestion contract. A rejected record is reported here, never dropped silently." }) });
   }
 
   function render() {
@@ -106,7 +86,7 @@ const Dashboard = (function () {
         statCard({ icon: "shield-alert", tone: "unknown", label: "Flagged for injection", value: Core.number(f.flagged),
           caption: "All 15 rules still ran; text withheld from the model", href: href("claims", null, { flag: "flagged" }) }),
       ]),
-      card({ title: "Life cycle of this run", meta: "Click a step to open it", body: lifecycleStrip(Core.runStages(DATA, events), {
+      card({ title: "Life cycle of this run", body: lifecycleStrip(Core.runStages(DATA, events), {
         label: "Life cycle of this run",
         onPick: (s) => {
           const [key, anchor, params] = toPage[s.key];
@@ -116,12 +96,11 @@ const Dashboard = (function () {
       }) }),
       h("div", { class: "grid grid--main-side" },
         h("div", { class: "stack" },
-          card({ title: "Routes", meta: `Routing policy ${DATA.routing.policy_version}`, body: bars(Core.ROUTE_ORDER.map((r) => ({
+          card({ title: "Routes", body: bars(Core.ROUTE_ORDER.map((r) => ({
             label: Core.ROUTE[r].label, value: f.routes[r] || 0, tone: Core.ROUTE[r].tone, href: href("claims", null, { route: r }) }))) }),
-          card({ title: "Results", meta: `${Core.number(CLAIMS.length * 15)} claim-rule results`, body: bars(Core.STATUS_ORDER.map((s) => ({
-            label: Core.STATUS[s].label, value: counts[s], tone: { fail: "fail", unknown: "unknown", pass: "pass", neutral: "neutral" }[Core.STATUS[s].tone] }))) }),
+          card({ title: "Results", meta: `${Core.number(CLAIMS.length * 15)} checks`, body: bars(statusBars(counts)) }),
           card({ title: "Rules most often failing or unassessed", flush: true, body: ruleTable() })),
-        h("div", { class: "stack" }, runCard(), eventsCard())),
+        h("div", { class: "stack" }, eventsCard())),
       Object.assign(rejectedCard(), { id: "sec-rejected" }));
   }
 

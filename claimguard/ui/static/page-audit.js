@@ -1,20 +1,10 @@
 "use strict";
 // Audit Logs: the run's hash-chained audit log (claimguard.audit.chain), as
 // verified when this page was built. Tamper-evident, not immutable (doc 10).
+// How decisions and corrections reach the log is documented in
+// docs/INTERFACE.md, not in the page.
 
 const AuditPage = (function () {
-  const COMMANDS = [
-    "# Add the decisions downloaded from this page to the chain (checked first; one bad decision writes nothing):",
-    "python -m claimguard.ui.decisions --decisions review_decisions_<run>.jsonl --log outputs/audit.jsonl \\",
-    "    --results outputs/dev_predictions.jsonl --claims data/development/claims.jsonl",
-    "",
-    "# Correct a claim: version 2 is checked again by all 15 rules and recorded in the chain:",
-    "python -m claimguard.review.correct --claims data/development/claims.jsonl --claim-id <CLAIM> \\",
-    "    --changes fix.json --actor \"<name>\" --reason \"<why>\" --log outputs/audit.jsonl --output outputs/corrections",
-    "",
-    "# Then rebuild this page with --audit-log outputs/audit.jsonl --corrections outputs/corrections",
-  ].join("\n");
-
   function eventPanel(row) {
     const e = row.event;
     openPanel(`Event #${row.sequence}`, h("div", { class: "stack" },
@@ -35,8 +25,8 @@ const AuditPage = (function () {
   function render(route) {
     const audit = DATA.audit;
     if (!audit) {
-      return card({ body: emptyState({ icon: "history", title: "No audit log given",
-        text: "Run python -m claimguard.run with --audit-log outputs/audit.jsonl, then build this page with the same --audit-log." }) });
+      return card({ body: emptyState({ icon: "history", title: "No audit log",
+        text: "No audit log was loaded for this run." }) });
     }
     const rows = audit.events;
     const types = Core.count(rows, (r) => r.event.event);
@@ -84,15 +74,14 @@ const AuditPage = (function () {
       ]),
       audit.valid
         ? callout({ tone: "pass", icon: "lock", title: "Chain verified when this page was built",
-          text: `Every event links to the one before it by SHA-256, and ${audit.anchored ? "the anchored head matches, so no event was removed or rewritten" : "there is no anchor file, so removing events from the end would not be detected"}. Tamper-evident, not immutable: whoever controls both the log and its anchor can rewrite both (doc 10).` })
+          text: `Every event links to the one before it by SHA-256, and ${audit.anchored ? "the anchored head matches, so no event was removed or rewritten" : "there is no anchor file, so removing events from the end would not be detected"}. Tamper-evident, not immutable: whoever controls both the log and its anchor can rewrite both.` })
         : callout({ tone: "fail", icon: "alert-triangle", title: "Chain INVALID", role: "alert",
           text: `${audit.error}. Do not trust these events until the log is restored from a trusted copy.` }),
       can("view_run_events") ? null : callout({ tone: "neutral", icon: "user",
         title: `${Core.plural(rows.length - visible.length, "run event")} hidden for your role`,
-        text: "Runs, rejections, injection flags and model failures need the view_run_events permission, which admins have. Switch “View as” to Admin to see them. This is a demonstration without login, not a security control (doc 10)." }),
+        text: "Runs, rejections, injection flags and model failures are shown to admins. Switch “View as” to Admin to see them. This is a demonstration without login, not a security control." }),
       card({ title: "Events", meta: h("span", { class: "mono small", text: audit.log }), flush: true,
-        body: h("div", {}, h("div", { class: "card__body" }, filters), holder) }),
-      card({ title: "Adding decisions and corrections", body: h("pre", { class: "untrusted", text: COMMANDS }) }));
+        body: h("div", {}, h("div", { class: "card__body" }, filters), holder) }));
   }
 
   return { render, eventPanel };

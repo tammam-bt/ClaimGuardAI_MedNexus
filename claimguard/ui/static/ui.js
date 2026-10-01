@@ -113,9 +113,12 @@ function routeBadge(route) {
   const r = Core.ROUTE[route];
   return badge(r.label, { tone: r.tone, icon: r.icon, extra: "badge--route", title: r.help });
 }
-function severityBadge(severity) {
+// "High" in a Severity column; { long: true } adds the noun where no label
+// says it is a severity (a finding's head).
+function severityBadge(severity, opts) {
   const s = Core.SEVERITY[severity] || { label: String(severity) };
-  return badge(`${s.label} severity`, { extra: `badge--severity${severity === "high" ? " is-high" : ""}` });
+  return badge(opts && opts.long ? `${s.label} severity` : s.label,
+    { extra: `badge--severity${severity === "high" ? " is-high" : ""}`, title: `${s.label} severity` });
 }
 function outcomeBadge(outcome) {
   const o = Core.OUTCOME[outcome];
@@ -201,6 +204,14 @@ function bars(items) {
     h("span", { class: "bar__track", role: "img", "aria-label": `${i.label}: ${i.value}` },
       h("span", { class: `bar__fill fill-${i.tone}`, style: { width: `${(100 * i.value) / max}%` } })),
     h("span", { class: "bar__value", text: i.display || Core.number(i.value) }))));
+}
+
+// Result statuses as bars. "Not implemented" appears only when a check did
+// not run: a row of zeros there is noise.
+function statusBars(counts) {
+  return Core.STATUS_ORDER.filter((s) => s !== "NOT_IMPLEMENTED" || counts[s] > 0).map((s) => ({
+    label: Core.STATUS[s].label, value: counts[s],
+    tone: { fail: "fail", unknown: "unknown", pass: "pass", neutral: "neutral" }[Core.STATUS[s].tone] }));
 }
 
 // ------------------------------------------------------------------- table
@@ -319,9 +330,8 @@ function checkGrid(results, opts) {
   const o = opts || {};
   return h("ul", { class: "checks", "aria-label": "All 15 checks" }, results.map((r) => {
     const s = Core.STATUS[r.status];
-    const inner = [icon(s.icon, { size: "sm" }),
-      h("span", { class: "check__text" }, h("span", { class: "check__id", text: r.rule_id }),
-        h("span", { class: "check__name", text: ruleName(r.rule_id) }))];
+    const inner = [h("span", { class: "check__top" }, icon(s.icon, { size: "sm" }), h("span", { class: "check__id", text: r.rule_id })),
+      h("span", { class: "check__name", text: ruleName(r.rule_id) })];
     const cls = `check tone-${s.tone}`;
     const title = `${r.rule_id} ${ruleName(r.rule_id)}: ${s.label}`;
     return h("li", {}, o.onPick
@@ -330,14 +340,16 @@ function checkGrid(results, opts) {
   }));
 }
 
-// Evidence as the engine cited it: JSON pointer and exact value.
-function evidenceTable(evidence) {
+// Evidence as the engine cited it: the field, named for a reviewer (the
+// claim names lines and documents by their own IDs), and its value as plain
+// text. A list or an object is source text: it stays boxed as data.
+function evidenceTable(evidence, claim) {
   return h("table", { class: "evidence" },
-    h("thead", {}, h("tr", {}, h("th", { scope: "col", text: "Field (JSON pointer)" }), h("th", { scope: "col", text: "Value" }))),
-    h("tbody", {}, evidence.map((e) => h("tr", {}, h("td", { text: e.path }),
-      h("td", {}, typeof e.value === "object" && e.value !== null
-        ? h("pre", { text: JSON.stringify(e.value, null, 2) })
-        : h("span", { class: "mono", text: e.value === null ? "null" : JSON.stringify(e.value) }))))));
+    h("thead", {}, h("tr", {}, h("th", { scope: "col", text: "Field" }), h("th", { scope: "col", text: "Value" }))),
+    h("tbody", {}, evidence.map((e) => h("tr", {}, h("td", { text: Core.fieldLabel(e.path, claim) }),
+      h("td", {}, e.value !== null && typeof e.value === "object"
+        ? h("pre", { class: "untrusted", text: Core.plain(e.value) })
+        : value(e.value))))));
 }
 
 // The life cycle of one claim (Core.lifecycle) or of the run (same look).
@@ -367,12 +379,14 @@ const EXPECTED = ["PASS", "FAIL", "UNABLE_TO_ASSESS", "NOT_APPLICABLE"];
 const PREDICTED = EXPECTED.concat(["NOT_IMPLEMENTED"]);
 function confusionMatrix(cells, caption) {
   const at = new Map(cells.map((c) => [`${c.expected}|${c.predicted}`, c.count]));
+  // "Not implemented" is a column only when some check did not run.
+  const predicted = PREDICTED.filter((p) => p !== "NOT_IMPLEMENTED" || cells.some((c) => c.predicted === p && c.count > 0));
   return h("div", { class: "table-wrap" }, h("table", { class: "table matrix" },
     h("caption", { class: "sr-only", text: caption || "Expected status against predicted status" }),
     h("thead", {}, h("tr", {}, h("th", { scope: "col", text: "Expected ↓ · Predicted →" }),
-      PREDICTED.map((p) => h("th", { scope: "col", class: "num", text: Core.STATUS[p].short })))),
+      predicted.map((p) => h("th", { scope: "col", class: "num", text: Core.STATUS[p].short })))),
     h("tbody", {}, EXPECTED.map((e) => h("tr", {}, h("th", { scope: "row", text: Core.STATUS[e].label }),
-      PREDICTED.map((p) => {
+      predicted.map((p) => {
         const n = at.get(`${e}|${p}`) || 0;
         const tone = n === 0 ? "" : e === p ? "tone-pass" : "tone-fail";
         return h("td", { class: `num ${tone}`, title: `Expected ${e}, predicted ${p}: ${n}`, text: Core.number(n) });
@@ -388,7 +402,17 @@ function routingRules() {
     h("div", { class: "row" }, routeBadge("REVIEW"), h("span", { text: Core.ROUTE.REVIEW.help })),
     h("div", { class: "row" }, routeBadge("CLEAR"), h("span", { text: `${Core.ROUTE.CLEAR.help} Clear claims need no review.` })),
     h("p", { class: "muted", text: "A finding is settled only by “Dismiss with reason”. “Confirm issue” means the claim needs a correction, “Request information” waits for the source, and “Corrected, recheck” sends the claim back through the rules as a new version. A decision taken on another version of the claim, or on a status that has since changed, does not count. A check that did not run can never be dismissed." }),
-    h("p", { class: "muted", text: "Routes are computed from this run's results by claimguard.review.routing; nothing here is a score or a probability." }));
+    h("p", { class: "muted", text: "Routes follow these fixed rules, applied to this run's results. Nothing here is a score or a probability." }));
+}
+
+// ---------------------------------------------------------- explanations
+// How findings are explained in this run, in one plain line (Settings and
+// Evaluation). Only a real model is called AI; the mock is not one.
+function explainerLine() {
+  const ai = DATA.run && DATA.run.ai ? DATA.run.ai.summary : null;
+  if (!ai) return "This run has no explanations.";
+  if (ai.provider === "mock") return "AI explainer not enabled. Findings use the rule's own explanation.";
+  return `AI explanations are written by ${ai.provider}${ai.model ? ` (${ai.model})` : ""} and checked before they are shown. They never change a result.`;
 }
 
 // ----------------------------------------------------------- audit events
@@ -447,10 +471,11 @@ function downloadDecisions() {
   download(`review_decisions_${RUN_ID.slice(0, 8)}.jsonl`, State.drafts.map((d) => JSON.stringify(d)).join("\n") + "\n");
 }
 
-// A source value as written: null stays visible as null (a known absence).
+// A source value as plain text (Core.plain). A missing value is a dash, with
+// a tooltip saying the source has none.
 function value(v) {
-  if (v === null || v === undefined) return h("span", { class: "mono muted", text: "null", title: "No value in the source" });
-  return typeof v === "string" ? v : JSON.stringify(v);
+  if (v === null || v === undefined || v === "") return h("span", { class: "muted", text: "—", title: "No value in the source" });
+  return Core.plain(v);
 }
 
 // ------------------------------------------------------------- download

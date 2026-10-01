@@ -7,13 +7,14 @@ const EvaluationPage = (function () {
   const pct = (x) => Core.percent(x);
 
   function missing() {
-    return card({ body: emptyState({ icon: "bar-chart", title: "No expected results given",
-      text: "Build the page with --gold, for example: python -m claimguard.ui --results outputs/dev_predictions.jsonl --claims data/development/claims.jsonl --gold data/development/expected_results.jsonl" }) });
+    return card({ body: emptyState({ icon: "bar-chart", title: "Not scored",
+      text: "Expected results weren't loaded, so this run isn't scored." }) });
   }
 
   function perRuleTable(ev) {
     const rows = DATA.rules.map((r) => ({ rule: r, m: ev.by_rule[r.rule_id] })).filter((x) => x.m);
     const n = (k) => ({ key: k, label: { tp: "TP", fp: "FP", fn: "FN", tn: "TN" }[k], num: true, sort: (x) => x.m[k], render: (x) => Core.number(x.m[k]) });
+    const anyNotImplemented = rows.some((x) => x.m.not_implemented > 0);
     return table({ caption: "Metrics per rule", rows, onRowClick: (x) => go("rules", x.rule.rule_id),
       columns: [
         { key: "rule", label: "Rule", sort: (x) => x.rule.rule_id, render: (x) => h("span", {},
@@ -25,8 +26,8 @@ const EvaluationPage = (function () {
         n("tp"), n("fp"), n("fn"), n("tn"),
         { key: "abst", label: "False / missed abst.", num: true, sort: (x) => x.m.false_abstentions + x.m.missed_abstentions,
           render: (x) => `${x.m.false_abstentions} / ${x.m.missed_abstentions}` },
-        { key: "ni", label: "Not impl.", num: true, sort: (x) => x.m.not_implemented, render: (x) => Core.number(x.m.not_implemented) },
-      ] });
+        anyNotImplemented ? { key: "ni", label: "Not impl.", num: true, sort: (x) => x.m.not_implemented, render: (x) => Core.number(x.m.not_implemented) } : null,
+      ].filter(Boolean) });
   }
 
   function mismatchCard(ev) {
@@ -49,16 +50,12 @@ const EvaluationPage = (function () {
     const ai = DATA.run && DATA.run.ai ? DATA.run.ai.summary : null;
     if (!ai) {
       return card({ title: "AI explanations", body: emptyState({ icon: "sparkles", title: "Not run",
-        text: "Run claimguard.run with --explain to add explanations." }) });
+        text: "This run has no explanations." }) });
     }
     const fallbacks = Object.entries(ai.failures || {});
     return card({ title: "AI explanations", meta: "Not scored here", body: h("div", { class: "stack" },
+      h("p", { class: "small", text: explainerLine() }),
       kv([
-        ["Provider", ai.provider === "mock" ? "mock (no model is wired yet)" : ai.provider],
-        ["Model", value(ai.model)],
-        ["Why this provider", ai.provider_reason],
-        ["Prompt", ai.prompt_version],
-        ["Timeout", `${ai.timeout_s} s`],
         ["Findings", Core.number(ai.findings)],
         ["By source", Object.entries(ai.by_source).map(([k, v]) => {
           const kind = k === "provider" && ai.provider === "mock" ? "mock" : k;
@@ -67,7 +64,7 @@ const EvaluationPage = (function () {
         ["Fallbacks", fallbacks.length ? fallbacks.map(([k, v]) => `${k}: ${v}`).join(" · ") : "None"],
       ]),
       callout({ tone: "info", icon: "info", title: "Explanation quality is scored by people",
-        text: "The scorer checks statuses and evidence only. Doc 07 scores explanations by hand on the 25 exercise cases: python -m claimguard.ai.exercises writes the scorecard to fill in, mock first, then the model." })) });
+        text: "The scorer checks statuses and evidence only. Explanations are scored by hand, on the 25 exercise cases." })) });
   }
 
   function render() {
@@ -86,7 +83,7 @@ const EvaluationPage = (function () {
           value: `${Core.number(ev.claims_with_all_statuses_correct)} / ${Core.number(CLAIMS.length)}`, caption: "All 15 statuses as expected" }),
       ]),
       callout({ tone: "info", icon: "info", title: "What this measures",
-        text: `${ev.note} Expected results: ${DATA.sources.gold}. High accuracy on this synthetic set is not evidence of production readiness (doc 07).` }),
+        text: `${ev.note} Expected results: ${DATA.sources.gold}. High accuracy on this synthetic set is not evidence of production readiness.` }),
       card({ title: "Expected against predicted", meta: `All rules · ${Core.number(o.count)} pairs`, body: confusionMatrix(ev.confusion) }),
       card({ title: "Per rule", meta: "Click a rule to open it", flush: true, body: perRuleTable(ev) }),
       h("div", { class: "grid grid--main-side" },

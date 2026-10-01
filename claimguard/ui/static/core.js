@@ -48,10 +48,12 @@ const Core = (function () {
   const APPROVAL = "dismiss_with_reason"; // claimguard/review/routing.py
 
   // Explanation record sources (claimguard/ai/watchdog.py, explainer.py).
+  // Only a genuine model answer is called an AI explanation; the mock and
+  // every fallback show the rule's own text and say so.
   const SOURCE = {
     provider: { label: "AI explanation", icon: "sparkles", tone: "info" },
-    mock: { label: "Template text (mock, no model)", icon: "scroll", tone: "neutral" },
-    fallback: { label: "Rule explanation (fallback)", icon: "cpu", tone: "unknown" },
+    mock: { label: "Rule's explanation", icon: "scroll", tone: "neutral" },
+    fallback: { label: "Rule's explanation (AI answer rejected)", icon: "cpu", tone: "unknown" },
     skipped_flagged: { label: "Withheld from the model", icon: "shield-alert", tone: "neutral" },
   };
 
@@ -110,7 +112,8 @@ const Core = (function () {
   // ------------------------------------------------------------------ helpers
   const blank = (v) => v === null || v === undefined || String(v).trim() === "";
   const count = (items, key) => items.reduce((acc, x) => { const k = key(x); acc[k] = (acc[k] || 0) + 1; return acc; }, {});
-  const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + "s")}`;
+  // n may be a number or an already formatted one ("1,200").
+  const plural = (n, one, many) => `${n} ${n === 1 || n === "1" ? one : (many || one + "s")}`;
 
   // ---------------------------------------------------------------- decisions
   // Mirrors claimguard.review.routing.outstanding(): per finding, the latest
@@ -208,31 +211,30 @@ const Core = (function () {
     const result = outcome(entry, events);
 
     let explained;
-    if (ex === null || ex === undefined) explained = { state: "skipped", summary: "AI explanation not run" };
-    else if (toExplain === 0) explained = { state: "skipped", summary: "nothing to explain" };
-    else if (flagged) explained = { state: "skipped", summary: "withheld from the model (flagged)" };
+    if (ex === null || ex === undefined) explained = { state: "skipped", summary: "Not run" };
+    else if (toExplain === 0) explained = { state: "skipped", summary: "Nothing to explain" };
+    else if (flagged) explained = { state: "skipped", summary: "Withheld from the model" };
     else {
-      const bySource = count(ex, (e) => e.source);
-      const fallbacks = bySource.fallback || 0;
-      const mock = ex.some((e) => e.provider === "mock");
+      const fallbacks = ex.filter((e) => e.source === "fallback").length;
       explained = {
         state: fallbacks ? "warn" : "done",
-        summary: `${plural(ex.length, "finding")} ${mock ? "by template (mock)" : "explained"}` + (fallbacks ? `, ${fallbacks} by fallback` : ""),
+        summary: `${number(ex.length - fallbacks)} explained` + (fallbacks ? ` · ${plural(fallbacks, "fallback")}` : ""),
       };
     }
+    const checked = [`${number(c.PASS)} passed`,
+      c.FAIL ? `${number(c.FAIL)} failed` : null,
+      c.UNABLE_TO_ASSESS ? `${number(c.UNABLE_TO_ASSESS)} unable` : null,
+      c.NOT_IMPLEMENTED ? `${number(c.NOT_IMPLEMENTED)} not implemented` : null].filter(Boolean).join(" · ");
 
     const stages = {
-      received: { state: p ? "done" : "warn",
-        summary: p ? `${p.adapter} · line ${p.line_number}` : "provenance not recorded" },
-      ingested: { state: "done", summary: "accepted" },
-      checked: { state: c.FAIL ? "fail" : (c.UNABLE_TO_ASSESS || c.NOT_IMPLEMENTED ? "warn" : "done"),
-        summary: `${c.PASS} passed · ${c.FAIL} failed · ${c.UNABLE_TO_ASSESS} unable` },
-      screened: { state: flagged ? "warn" : "done",
-        summary: flagged ? `flagged: ${plural(entry.flag.hits.length, "hit")}` : "no instruction-like text" },
+      received: { state: p ? "done" : "warn", summary: p ? "Received" : "Source not recorded" },
+      ingested: { state: "done", summary: "Accepted" },
+      checked: { state: c.FAIL ? "fail" : (c.UNABLE_TO_ASSESS || c.NOT_IMPLEMENTED ? "warn" : "done"), summary: checked },
+      screened: { state: flagged ? "warn" : "done", summary: flagged ? "Flagged for injection" : "No injection found" },
       explained,
       routed: { state: "done", summary: ROUTE[entry.route.route].label },
       review: reasons.length === 0
-        ? { state: "skipped", summary: "not needed" }
+        ? { state: "skipped", summary: "Not needed" }
         : { state: decided === reasons.length ? "done" : "current", summary: `${decided} / ${reasons.length} decided` },
       outcome: { state: result === "ready" ? "done" : "current", summary: OUTCOME[result].label, outcome: result },
     };
@@ -266,22 +268,23 @@ const Core = (function () {
     const total = routed.reduce((n, c) => n + c.route.reasons.length, 0);
     const decided = routed.reduce((n, c) => n + Object.keys(latestDecisions(c, events)).length, 0);
     const ready = f.outcomes.ready;
-    let explained = { state: "skipped", summary: "AI explanation not run" };
+    let explained = { state: "skipped", summary: "Not run" };
     if (ai) {
       const failures = Object.values(ai.failures || {}).reduce((a, b) => a + b, 0);
-      // The mock is not a model: say so rather than "explained".
-      const written = ai.provider === "mock" ? "by template (mock)" : "explained";
+      const withheld = ai.by_source.skipped_flagged || 0;
       explained = {
         state: failures ? "warn" : "done",
-        summary: `${number(ai.by_source.provider || 0)} ${written} · ${number(ai.by_source.skipped_flagged || 0)} withheld · ` +
-          plural(failures, "fallback"),
+        summary: [`${number(ai.by_source.provider || 0)} explained`, withheld ? `${number(withheld)} withheld` : null,
+          failures ? plural(number(failures), "fallback") : null].filter(Boolean).join(" · "),
       };
     }
     const stages = {
-      received: { state: "done", summary: plural(f.received, "record") },
-      ingested: { state: f.rejected ? "warn" : "done", summary: `${number(f.accepted)} accepted · ${number(f.rejected)} rejected` },
-      checked: { state: ruleErrors ? "fail" : "done", summary: `${number(results)} results · ${plural(ruleErrors, "rule error")}` },
-      screened: { state: f.flagged ? "warn" : "done", summary: `${number(f.flagged)} flagged for injection` },
+      received: { state: "done", summary: plural(number(f.received), "record") },
+      ingested: { state: f.rejected ? "warn" : "done",
+        summary: `${number(f.accepted)} accepted` + (f.rejected ? ` · ${number(f.rejected)} rejected` : "") },
+      checked: { state: ruleErrors ? "fail" : "done",
+        summary: `${number(results)} checks` + (ruleErrors ? ` · ${plural(number(ruleErrors), "rule error")}` : "") },
+      screened: { state: f.flagged ? "warn" : "done", summary: f.flagged ? `${number(f.flagged)} flagged for injection` : "No injection found" },
       explained,
       routed: { state: "done",
         summary: `${number(f.routes.ESCALATE || 0)} escalate · ${number(f.routes.REVIEW || 0)} review · ${number(f.routes.CLEAR || 0)} clear` },
@@ -322,10 +325,79 @@ const Core = (function () {
   }
   function shortHash(h) { return typeof h === "string" ? h.slice(0, 12) : "—"; }
 
+  // ------------------------------------------------- field names and values
+  // A reviewer reads "Line L1 › Service date", never "/lines/0/service_date".
+  const COLLECTION = {
+    lines: { many: "Service lines", one: "Line", id: "line_id" },
+    attachments: { many: "Documents", one: "Document", id: "attachment_id" },
+    authorizations: { many: "Authorizations", one: "Authorization", id: "authorization_id" },
+  };
+  // "beneficiary_patient_id" -> "Beneficiary patient ID"
+  function humanize(key) {
+    const words = String(key).split(/[_\s]+/).filter(Boolean).map((w) => (w.toLowerCase() === "id" ? "ID" : w.toLowerCase()));
+    if (!words.length) return String(key);
+    return words.map((w, i) => (i === 0 && w !== "ID" ? w[0].toUpperCase() + w.slice(1) : w)).join(" ");
+  }
+  // A JSON pointer as a field label. The claim, when given, names a line or
+  // a document by its own ID instead of its position.
+  function fieldLabel(pointer, claim) {
+    if (pointer === "") return "Claim";
+    if (typeof pointer !== "string" || !pointer.startsWith("/")) return String(pointer);
+    const parts = pointer.split("/").slice(1).map((p) => p.replace(/~1/g, "/").replace(/~0/g, "~"));
+    const out = [];
+    let node = claim;
+    let collection = null; // the collection the previous part named, if any
+    for (const part of parts) {
+      const index = /^\d+$/.test(part) ? Number(part) : null;
+      if (index !== null) {
+        const item = Array.isArray(node) ? node[index] : undefined;
+        if (collection) {
+          const own = item && typeof item[collection.id] === "string" && item[collection.id].trim();
+          out[out.length - 1] = `${collection.one} ${own ? item[collection.id] : index + 1}`;
+        } else out.push(`Item ${index + 1}`);
+        node = item;
+        collection = null;
+      } else {
+        collection = out.length === 0 && Object.prototype.hasOwnProperty.call(COLLECTION, part) ? COLLECTION[part] : null;
+        out.push(collection ? collection.many : humanize(part));
+        node = node && typeof node === "object" ? node[part] : undefined;
+      }
+    }
+    return out.length ? out.join(" › ") : "Claim";
+  }
+
+  // A source value as plain text: no quotes, a missing value as "—", numbers
+  // as numbers, an object or a list as short readable lines.
+  const EXACT = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 20 });
+  function plain(v) {
+    if (v === null || v === undefined || v === "") return "—";
+    if (typeof v === "string") return v;
+    if (typeof v === "number") return isFinite(v) ? EXACT.format(v) : String(v);
+    if (typeof v === "boolean") return v ? "Yes" : "No";
+    if (Array.isArray(v)) {
+      if (!v.length) return "None";
+      if (v.every((x) => x === null || typeof x !== "object")) return v.map(plain).join(", ");
+      return v.map((x, i) => {
+        if (!x || typeof x !== "object" || Array.isArray(x)) return plain(x);
+        const idKey = Object.keys(x).find((k) => /_id$/.test(k) && typeof x[k] === "string" && x[k].trim());
+        const rest = Object.entries(x).filter(([k]) => k !== idKey).map(([k, y]) => `${humanize(k)}: ${inline(y)}`);
+        return [idKey ? x[idKey] : `Item ${i + 1}`, ...rest].join(" · ");
+      }).join("\n");
+    }
+    return Object.entries(v).map(([k, y]) => `${humanize(k)}: ${inline(y)}`).join("\n");
+  }
+  function inline(v) {
+    if (v && typeof v === "object") {
+      if (Array.isArray(v)) return v.length ? v.map(inline).join(", ") : "None";
+      return `(${Object.entries(v).map(([k, y]) => `${humanize(k)}: ${inline(y)}`).join(", ")})`;
+    }
+    return plain(v);
+  }
+
   return {
     STATUS, STATUS_ORDER, ROUTE, ROUTE_ORDER, SEVERITY, ACTION, ACTION_ORDER, SOURCE, OUTCOME, OUTCOME_ORDER, STAGES,
     FAMILY, EVENT, outstanding, latestDecisions, outcome, statusCounts, lifecycle, funnel, runStages, findings, decisionEvent,
-    number, money, date, datetime, percent, shortHash, plural, count,
+    number, money, date, datetime, percent, shortHash, plural, count, humanize, fieldLabel, plain,
   };
 })();
 

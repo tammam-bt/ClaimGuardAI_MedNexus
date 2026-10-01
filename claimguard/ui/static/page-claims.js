@@ -121,24 +121,21 @@ const ClaimViews = (function () {
 const ClaimDetail = (function () {
   function section(id, node) { node.id = id; return node; }
 
-  function explanationBlock(entry, result) {
-    if (entry.explanations === null) {
-      return h("p", { class: "muted small", text: "The AI explainer was not run for this run (claimguard.run without --explain)." });
-    }
-    const ex = entry.explanations.find((e) => e.rule_id === result.rule_id);
-    if (!ex) return h("p", { class: "muted small", text: "No explanation record for this finding." });
-    // The mock is not a model: its text is the rule's own explanation, and
-    // it is labelled as such rather than as AI.
-    const kind = ex.source === "provider" && ex.provider === "mock" ? "mock" : ex.source;
-    const note = kind === "skipped_flagged"
-      ? "This claim was flagged by the injection pre-filter, so its findings were never sent to the model. The rule's own explanation is shown."
-      : kind === "fallback"
-        ? `The model's answer was rejected by the watchdog (${ex.failure ? ex.failure.reason : "unknown reason"}); the rule's own explanation is shown.`
-        : kind === "mock"
-          ? `No model is wired yet: the mock provider returns the rule's own explanation (prompt ${ex.prompt_version}). A live model will write its own text here, checked by the watchdog.`
-          : `Written by ${ex.provider}${ex.model ? " · " + ex.model : ""}, prompt ${ex.prompt_version}. Checked by the watchdog; it cannot change the result.`;
-    return h("div", { class: "explanation stack" }, h("div", { class: "row" }, sourceBadge(kind)),
-      h("p", { text: ex.explanation }), h("p", { class: "muted small", text: note }));
+  // Where a finding's explanation came from. The mock is not a model: its
+  // text is the rule's own explanation, and it is labelled as such. Only a
+  // genuine model answer that says something else is shown a second time.
+  function explanationOf(entry, result) {
+    const ex = (entry.explanations || []).find((e) => e.rule_id === result.rule_id) || null;
+    const kind = !ex ? "mock" : ex.source === "provider" && ex.provider === "mock" ? "mock" : ex.source;
+    const own = !ex || kind !== "provider" || String(ex.explanation || "").trim() === "" ||
+      String(ex.explanation).trim() === String(result.explanation || "").trim();
+    return { kind, record: ex, own };
+  }
+  function explanationLabel(x) {
+    const s = Core.SOURCE[x.kind] || Core.SOURCE.mock;
+    const why = x.kind === "fallback" && x.record && x.record.failure ? `The AI answer was rejected (${x.record.failure.reason}).`
+      : x.kind === "skipped_flagged" ? "This claim was flagged for injection, so its findings were never sent to the model." : null;
+    return badge(s.label, { tone: s.tone, icon: s.icon, title: why });
   }
 
   // One finding: what the engine found, why, and the reviewer's decision.
@@ -205,18 +202,24 @@ const ClaimDetail = (function () {
     }
 
     function draw() {
+      const ex = explanationOf(entry, r);
       box.replaceChildren(
         h("div", { class: "finding__head" },
           h("span", { class: "mono", text: r.rule_id }), h("span", { class: "finding__title", text: rule.title }),
-          statusBadge(r.status), severityBadge(r.severity), methodBadge(),
+          statusBadge(r.status), severityBadge(r.severity, { long: true }),
           r.affected_line_ids.length ? badge(`Line ${r.affected_line_ids.join(", ")}`, { tone: "neutral" }) : null),
         h("div", { class: "finding__body" },
-          h("div", { class: "finding__section" }, h("span", { class: "label", text: "What the engine found" }), h("p", { text: r.explanation })),
-          h("div", { class: "finding__section" }, h("span", { class: "label", text: "Explanation for the reviewer" }), explanationBlock(entry, r)),
-          h("div", { class: "finding__section" }, h("span", { class: "label", text: "Evidence the engine cited" }), evidenceTable(r.evidence)),
+          h("div", { class: "finding__section" },
+            h("div", { class: "row row--tight" }, h("span", { class: "label", text: "What the engine found" }), ex.own ? explanationLabel(ex) : null),
+            h("p", { text: r.explanation })),
+          ex.own ? null : h("div", { class: "finding__section" },
+            h("div", { class: "row row--tight" }, h("span", { class: "label", text: "Explanation for the reviewer" }), explanationLabel(ex)),
+            h("div", { class: "explanation stack" }, h("p", { text: ex.record.explanation }),
+              h("p", { class: "muted small", text: "Written by an AI model and checked before it is shown. It cannot change the result." }))),
+          h("div", { class: "finding__section" }, h("span", { class: "label", text: "Evidence the engine cited" }), evidenceTable(r.evidence, entry.claim)),
           r.corrective_action ? h("div", { class: "finding__section" }, h("span", { class: "label", text: "Corrective action" }), h("p", { text: r.corrective_action })) : null,
           h("details", { class: "disclosure" }, h("summary", { text: "Rule logic (rulebook)" }),
-            h("p", { class: "small", text: rule.logic }), h("p", { class: "muted small", text: `${rule.source}` })),
+            h("p", { class: "small", text: rule.logic })),
           decisionArea()));
     }
     draw();
@@ -231,7 +234,7 @@ const ClaimDetail = (function () {
     }
     return callout({ tone: route.route === "ESCALATE" ? "fail" : "unknown", icon: Core.ROUTE[route.route].icon,
       title: `Why ${Core.ROUTE[route.route].label.toLowerCase()}`,
-      text: `${Core.ROUTE[route.route].help} Routing policy ${DATA.routing.policy_version}.`,
+      text: Core.ROUTE[route.route].help,
       body: h("div", { class: "row", style: { marginTop: "8px" } }, route.reasons.map((x) =>
         h("a", { href: `#finding-${x.rule_id}`, class: "badge tone-neutral", style: { textDecoration: "none" },
           onClick: (ev) => { ev.preventDefault(); scrollToId(`finding-${x.rule_id}`); } },
@@ -243,7 +246,8 @@ const ClaimDetail = (function () {
     return callout({ tone: "unknown", icon: "shield-alert", title: "Flagged by the injection pre-filter",
       text: "Instruction-like text was found in this claim. All 15 rules still ran on it, and its findings were not sent to the model. The text is shown below as data only.",
       body: h("ul", { class: "small", style: { margin: "8px 0 0", paddingLeft: "18px" } }, entry.flag.hits.map((hit) =>
-        h("li", {}, h("span", { class: "mono", text: hit.path }), ` · ${Core.FAMILY[hit.family] || hit.family} · found in: ${hit.layer}`))) });
+        h("li", {}, hit.path === "(joined)" ? "Text across several fields" : Core.fieldLabel(hit.path, entry.claim),
+          ` · ${Core.FAMILY[hit.family] || hit.family} · found in: ${hit.layer}`))) });
   }
 
   function scrollToId(id) {
@@ -254,9 +258,9 @@ const ClaimDetail = (function () {
   function resultPanel(entry, r) {
     const rule = RULE_BY_ID.get(r.rule_id);
     openPanel(`${r.rule_id} · ${rule.title}`, h("div", { class: "stack" },
-      h("div", { class: "row" }, statusBadge(r.status), severityBadge(r.severity), methodBadge()),
+      h("div", { class: "row" }, statusBadge(r.status), severityBadge(r.severity, { long: true })),
       h("p", { text: r.explanation }),
-      h("span", { class: "label", text: "Evidence the engine cited" }), evidenceTable(r.evidence),
+      h("span", { class: "label", text: "Evidence the engine cited" }), evidenceTable(r.evidence, entry.claim),
       h("span", { class: "label", text: "Rule logic (rulebook)" }), h("p", { class: "small", text: rule.logic })));
   }
 
@@ -280,7 +284,7 @@ const ClaimDetail = (function () {
       { key: "status", label: "Status", render: (a) => value(a.status) },
       { key: "service_code", label: "Service", render: (a) => h("span", { class: "mono" }, value(a.service_code)) },
       { key: "patient_id", label: "Patient", render: (a) => h("span", { class: "mono" }, value(a.patient_id)) },
-      { key: "valid", label: "Valid", render: (a) => `${a.valid_from ? Core.date(a.valid_from) : "null"} – ${a.valid_to ? Core.date(a.valid_to) : "null"}` },
+      { key: "valid", label: "Valid", render: (a) => `${a.valid_from ? Core.date(a.valid_from) : "—"} – ${a.valid_to ? Core.date(a.valid_to) : "—"}` },
       { key: "max_quantity", label: "Max qty", num: true, render: (a) => value(a.max_quantity) },
     ] });
   }
@@ -321,20 +325,8 @@ const ClaimDetail = (function () {
       ["Status field", value(cv.status)],
       ["Beneficiary", h("span", { class: "mono" }, value(cv.beneficiary_patient_id))],
       ["Member", h("span", { class: "mono" }, value(cv.member_id))],
-      ["Period", `${cv.start_date ? Core.date(cv.start_date) : "null"} – ${cv.end_date ? Core.date(cv.end_date) : "null"}`],
+      ["Period", `${cv.start_date ? Core.date(cv.start_date) : "—"} – ${cv.end_date ? Core.date(cv.end_date) : "—"}`],
     ]) });
-  }
-
-  function provenanceCard(entry) {
-    const p = entry.provenance;
-    return section("sec-provenance", card({ title: "Provenance", body: kv([
-      ["Adapter", p ? `${p.adapter} ${p.adapter_version}` : null],
-      ["Source", p ? h("span", { class: "mono small", text: p.source }) : null],
-      ["Line", p ? Core.number(p.line_number) : null],
-      ["Record hash", p && p.record_sha256 ? h("span", { class: "mono small", text: Core.shortHash(p.record_sha256), title: p.record_sha256 }) : null],
-      ["Version hash", h("span", { class: "mono small", text: Core.shortHash(entry.input_hash), title: entry.input_hash })],
-      ["Run", DATA.run ? h("span", { class: "mono small", text: Core.shortHash(DATA.run.run_id), title: DATA.run.run_id }) : null],
-    ]) }));
   }
 
   // Corrected versions of this claim (python -m claimguard.review.correct).
@@ -345,14 +337,14 @@ const ClaimDetail = (function () {
         h("div", { class: "row" }, badge(`v${v.version}`, { tone: "info", icon: "refresh" }), routeBadge(v.route.route),
           h("span", { class: "small", text: `by ${v.actor}: ${v.reason}` })),
         h("div", { class: "row small" }, h("span", { class: "label", text: "What changed" }),
-          v.changes.map((c) => h("span", { class: "badge tone-neutral mono", text: `${c.op} ${c.path}` }))),
+          v.changes.map((c) => h("span", { class: "badge tone-neutral",
+            text: `${({ add: "Added", remove: "Removed", replace: "Changed", move: "Moved", copy: "Copied" })[c.op] || c.op}: ${Core.fieldLabel(c.path, entry.claim)}` }))),
         h("div", { class: "row small" }, h("span", { class: "label", text: "Status changes after recheck" }),
           v.status_changes.length ? v.status_changes.map((c) => h("span", { class: "row" },
             h("span", { class: "mono", text: c.rule_id }), statusBadge(c.before, { short: true }), "→", statusBadge(c.after, { short: true })))
             : h("span", { class: "muted", text: "None: the correction changed no status." })),
         h("span", { class: "label", text: `All 15 checks on v${v.version}` }),
-        checkGrid(v.results),
-        h("p", { class: "muted small mono", text: `v${v.version} ${Core.shortHash(v.input_hash)} ← parent ${Core.shortHash(v.parent_hash)}` })))) });
+        checkGrid(v.results)))) });
   }
 
   // This claim's audit events your role may see, then decisions not yet sent.
@@ -368,9 +360,9 @@ const ClaimDetail = (function () {
         h("span", { class: "row" }, badge("Draft in this browser", { tone: "neutral", icon: "user" })),
         h("span", { class: "small", text: eventSummary(d) }))),
     ];
-    return card({ title: "History", meta: DATA.audit ? "From the audit chain" : "No audit log given", body: items.length
+    return card({ title: "History", meta: DATA.audit ? "From the audit log" : null, body: items.length
       ? h("div", { class: "stack" }, items)
-      : h("p", { class: "muted small", text: DATA.audit ? "No event your role can see for this claim yet." : "Build the page with --audit-log to see this claim's history." }) });
+      : h("p", { class: "muted small", text: DATA.audit ? "No event your role can see for this claim yet." : "No audit log was loaded for this run." }) });
   }
 
   function progressCard(entry) {
@@ -385,7 +377,7 @@ const ClaimDetail = (function () {
       h("p", { class: "small", text: `${Core.plural(mine, "draft")} on this claim · ${Core.plural(State.drafts.length, "draft")} in all.` }),
       button({ label: `Download decisions (${State.drafts.length})`, variant: "primary", icon: "download",
         disabled: State.drafts.length === 0, onClick: downloadDecisions }),
-      h("p", { class: "muted small", text: "Decisions stay in this browser until downloaded. Append the file to the audit log with python -m claimguard.ui.decisions (see Audit Logs); it checks every decision first." })) });
+      h("p", { class: "muted small", text: "Decisions are kept in this browser until you download them." })) });
   }
 
   function nameCard(nameWatchers) {
@@ -394,8 +386,8 @@ const ClaimDetail = (function () {
       onInput: (e) => { State.reviewer = e.target.value; State.save(); nameWatchers.forEach((fn) => fn()); } });
     input.value = State.reviewer;
     return card({ title: "Your decisions", body: h("div", { class: "stack" },
-      h("label", { class: "field", for: "reviewer-name" }, "Your name, recorded with each decision", input),
-      h("p", { class: "muted small", text: `Role: ${State.role === "admin" ? "Admin" : "Reviewer"}. Names are self-declared; there is no login (doc 10).` })) });
+      h("label", { class: "field", for: "reviewer-name" }, "Your name", input),
+      h("p", { class: "muted small", text: `Role: ${State.role === "admin" ? "Admin" : "Reviewer"}. Your name is recorded with each decision.` })) });
   }
 
   function render(id) {
@@ -417,7 +409,7 @@ const ClaimDetail = (function () {
         entry.flag ? badge("Flagged for injection", { tone: "unknown", icon: "shield-alert" }) : null);
       fill(lifecycleHolder, lifecycleStrip(Core.lifecycle(entry, events), {
         label: `Life cycle of ${id}`,
-        onPick: (s) => scrollToId({ received: "sec-provenance", ingested: "sec-provenance", checked: "sec-checks",
+        onPick: (s) => scrollToId({ received: "sec-received", ingested: "sec-received", checked: "sec-checks",
           screened: entry.flag ? "sec-flag" : "sec-checks", explained: "sec-findings", routed: "sec-route",
           review: "sec-findings", outcome: "sec-findings" }[s.key]),
       }));
@@ -441,7 +433,7 @@ const ClaimDetail = (function () {
           [["Total", Core.money(c.total_amount, c.currency)], ["Submitted", Core.date(c.submission_date)],
             ["Policy", c.policy_id], ["Provider", c.provider_id], ["Lines", Core.number(c.lines.length)]]
             .map(([k, v]) => h("div", {}, h("dt", { text: k }), h("dd", { text: v }))))),
-      card({ title: "Life cycle", meta: "Click a step to jump to it", body: lifecycleHolder }),
+      card({ title: "Life cycle", body: lifecycleHolder }),
       versionsCard(entry),
       entry.flag ? section("sec-flag", flagCallout(entry)) : null,
       h("div", { class: "grid grid--main-side" },
@@ -460,10 +452,10 @@ const ClaimDetail = (function () {
           card({ title: "Authorizations", flush: !!c.authorizations.length, body: authorizationsBlock(c) }),
           card({ title: "Documents", body: attachmentsBlock(entry) }),
           historyCard(entry),
-          card({ title: "Claim as received", body: h("details", { class: "disclosure" },
+          section("sec-received", card({ title: "Claim as received", body: h("details", { class: "disclosure" },
             h("summary", { text: "Show the JSON envelope (untrusted text shown as data)" }),
-            h("pre", { class: "untrusted", text: JSON.stringify(c, null, 2) })) })),
-        h("div", { class: "sticky-side" }, nameCard(nameWatchers), progressHolder, partiesCard(c), coverageCard(c), provenanceCard(entry))));
+            h("pre", { class: "untrusted", text: JSON.stringify(c, null, 2) })) }))),
+        h("div", { class: "sticky-side" }, nameCard(nameWatchers), progressHolder, partiesCard(c), coverageCard(c))));
   }
 
   return { render };

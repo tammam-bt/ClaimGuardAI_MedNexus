@@ -140,7 +140,8 @@ try {
   }
   await page("Emulation.clearDeviceMetricsOverride");
   await goTo("#/dashboard");
-  out.dashboard = { lifecycle: await text(".lifecycle"), stats: await text(".grid--4"), rejected: await text("#sec-rejected") };
+  out.dashboard = { lifecycle: await text(".lifecycle"), stats: await text(".grid--4"), rejected: await text("#sec-rejected"),
+    page: await text(".content"), sidebar: await text(".sidebar") };
 
   // ---- audit: the role decides which events show
   await goTo("#/audit");
@@ -181,6 +182,8 @@ try {
   await goTo(`#/claims/${cid}`);
   out.queueCountBefore = await text(".nav__count");
   out.headBefore = await text(".claim-head__title");
+  out.claimPage = await text(".content");
+  out.sidebarUserBefore = await text(".sidebar__user");
   out.saveDisabledWithoutName = await evaluate("[...document.querySelectorAll('#finding-R003 button')].find(b => b.textContent.includes('Save')).disabled");
 
   const decide = async (rule, actionLabel, reason) => {

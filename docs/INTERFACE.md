@@ -62,7 +62,13 @@ python -m claimguard.review.correct --claims data/development/claims.jsonl --cla
     --log outputs/audit.jsonl --output outputs/corrections
 ```
 
-`fix.json` is a list of JSON Patch operations. The claim as received stays version 1 and is never edited. Version 2 runs through all 15 rules, and a `version_created` event is recorded. Rebuild with `--corrections outputs/corrections`: the claim shows *Rechecked as a new version*, what changed, the status changes and its new route. A correction never forces a pass: wrong data stays a finding.
+`fix.json` is a list of JSON Patch operations. The claim as received stays version 1 and is never edited.
+
+- Each correction builds on the latest version in `--output`: version 2, then 3, and so on.
+- The stored versions are replayed from the claim as received first. A version file that is not exactly its parent plus its recorded changes refuses the correction, and nothing is written.
+- The new version runs through all 15 rules, and a `version_created` event is recorded.
+
+Rebuild with `--corrections outputs/corrections`: the claim shows *Rechecked as a new version*, and for every version what changed, the status changes and its new route. A correction never forces a pass: wrong data stays a finding.
 
 ## Roles
 

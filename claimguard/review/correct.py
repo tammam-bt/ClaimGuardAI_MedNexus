@@ -10,10 +10,14 @@ remove from an array), as claimguard.review.correction accepts them:
 
     [{"op": "replace", "path": "/lines/0/authorization_id", "value": "AUTH-CG-B39790AC3604-1"}]
 
-The claim as received is version 1 and is never edited. The correction makes
-version 2, all 15 rules run on it (correction.recheck), and the command:
+The claim as received is version 1 and is never edited. A correction builds on
+the latest version already in --output: the first makes version 2, the next
+version 3, and so on. Every stored version is replayed from the claim as
+received first, and must be exactly its parent plus its own changes; a version
+file edited or out of place refuses the correction. All 15 rules run on the
+new version (correction.recheck), and the command:
 
-  - writes <output>/<claim_id>.v2.json: the version record (hashes, actor,
+  - writes <output>/<claim_id>.v<N>.json: the version record (hashes, actor,
     reason, changes), the corrected claim, its 15 results and the status
     changes, which the interface reads with --corrections;
   - with --log, appends a version_created event to the audit chain;
@@ -29,11 +33,36 @@ transport contract is refused, and nothing is written (DEC-011).
 """
 import argparse
 import json
+import re
 from pathlib import Path
 
 from claimguard._pack import load_jsonl
 from claimguard.audit import chain
-from claimguard.review.correction import original, recheck, rule_engine
+from claimguard.review.correction import correct, original, recheck, rule_engine
+
+
+def latest_version(claim, folder):
+    """The newest version of claim stored in folder, replayed from the claim
+    as received. Raises ValueError if a stored version is not exactly its
+    parent plus its own recorded changes."""
+    version = original(claim)
+    name = re.compile(re.escape(version.claim_id) + r"\.v([0-9]+)\.json")
+    stored = sorted((int(m.group(1)), p) for p in (Path(folder).glob("*.json") if Path(folder).is_dir() else [])
+                    if (m := name.fullmatch(p.name)))
+    for number, path in stored:
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+            if number != version.version + 1 or record.get("version") != number:
+                raise ValueError(f"version {version.version + 1} expected")
+            if record.get("parent_hash") != version.input_hash:
+                raise ValueError(f"its parent is not version {version.version} of this claim")
+            replayed = correct(version, record["changes"], actor=record["actor"], reason=record["reason"])
+            if replayed.input_hash != record.get("input_hash") or replayed.claim != record.get("claim"):
+                raise ValueError("its claim is not its parent plus its recorded changes")
+        except (ValueError, KeyError, TypeError) as e:
+            raise ValueError(f"{path.name} does not follow from the claim as received: {e}") from None
+        version = replayed
+    return version
 
 
 def correct_claim(claims_path, claim_id, changes, *, actor, reason, output, log=None, anchor=None):
@@ -43,7 +72,8 @@ def correct_claim(claims_path, claim_id, changes, *, actor, reason, output, log=
         raise ValueError(f"claim {claim_id} is not in {claims_path}")
     if not isinstance(changes, list):
         raise ValueError("changes must be a JSON list of operations")
-    run = recheck(original(claims[claim_id]), changes, actor=actor, reason=reason, engine=rule_engine())
+    parent = latest_version(claims[claim_id], output)
+    run = recheck(parent, changes, actor=actor, reason=reason, engine=rule_engine())
     record = {**run.version.record(), "claim": run.version.claim, "results": run.results,
               "status_changes": run.status_changes, "rule_errors": run.rule_errors}
     out = Path(output) / f"{claim_id}.v{run.version.version}.json"

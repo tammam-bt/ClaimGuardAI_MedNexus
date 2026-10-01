@@ -19,6 +19,10 @@ version 2, all 15 rules run on it (correction.recheck), and the command:
   - with --log, appends a version_created event to the audit chain;
   - prints what moved, e.g. R008 FAIL -> PASS.
 
+A rule that crashes during the recheck is reported as UNABLE_TO_ASSESS, as in
+a run: the version is still written, its rule_errors list the crash, and the
+command exits with 2.
+
 A correction that changes nothing, a blank actor or reason, an invalid
 operation, an edit to an identifier, or a corrected claim that fails the
 transport contract is refused, and nothing is written (DEC-011).
@@ -41,7 +45,7 @@ def correct_claim(claims_path, claim_id, changes, *, actor, reason, output, log=
         raise ValueError("changes must be a JSON list of operations")
     run = recheck(original(claims[claim_id]), changes, actor=actor, reason=reason, engine=rule_engine())
     record = {**run.version.record(), "claim": run.version.claim, "results": run.results,
-              "status_changes": run.status_changes}
+              "status_changes": run.status_changes, "rule_errors": run.rule_errors}
     out = Path(output) / f"{claim_id}.v{run.version.version}.json"
     if log:
         # The chain first: if it refuses, no version file claims to be recorded.
@@ -71,7 +75,10 @@ def main(argv=None):
         return 1
     moved = ", ".join(f"{c['rule_id']} {c['before']} -> {c['after']}" for c in record["status_changes"]) or "no status changed"
     print(f"{a.claim_id} v{record['version']} ({record['input_hash'][:12]}): {moved}. Written: {out}")
-    return 0
+    for e in record["rule_errors"]:
+        print(f"Rule error: {e['rule_id']} failed on version {e['version']} ({e['error']}); "
+              f"its result is UNABLE_TO_ASSESS.")
+    return 2 if record["rule_errors"] else 0
 
 
 if __name__ == "__main__":

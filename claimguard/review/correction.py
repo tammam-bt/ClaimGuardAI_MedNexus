@@ -11,11 +11,10 @@ The original is never edited and results are never patched: a correction
 creates a new version, and all 15 rules re-run on it. The version lives beside
 the claim, not in it, because validate_transport() rejects any extra key.
 
-Stand-ins until Role 1 ships its units (DEC-011):
+Role 1 pieces this module relies on (DEC-011):
   rule_engine()  delegates to claimguard.engine.runner, the package's one runner (U2.6);
   input_hash     hashes canonical JSON, not the original file bytes (U1.5);
-  record()       is returned for the audit trail, not written to it: the pack's
-                 audit.append() accepts only the four review actions (U4.4).
+  record()       is a version_created payload: chain.append(log, [{"event": "version_created", **v.record()}], anchor) (U4.5).
 """
 import copy
 import hashlib

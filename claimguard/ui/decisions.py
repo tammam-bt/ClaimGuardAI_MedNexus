@@ -11,10 +11,11 @@ writes nothing:
   - it passes claimguard.guards.rbac.authorize_event: the review-event schema's
     keys, a known actor whose role may take the action, and a reason;
   - created_at is an ISO date-time;
-  - with --results and --claims: the claim is in this run, the decision was
-    taken on this version of it (input_hash), on a finding the run flagged,
-    and on that finding's current status (original_status). A decision taken
-    on an older result is refused rather than recorded as if it were current.
+  - the claim is in this run (--claims), the decision was taken on this
+    version of it (input_hash), on a finding the run flagged (--results), and
+    on that finding's current status (original_status). A decision taken on
+    an older result is refused rather than recorded as if it were current.
+    Both files are required, so these checks always run.
 
 A decision already in the chain is skipped, so appending the same file twice
 adds nothing. --directory is a JSON file naming each actor's role
@@ -44,10 +45,12 @@ def _iso(value):
         return False
 
 
-def check(events, directory, claims=None, results=None):
-    """Problems with the decisions, one string per problem; empty means all pass."""
-    hashes = {cid: original(c).input_hash for cid, c in (claims or {}).items()}
-    status = {(r["claim_id"], r["rule_id"]): r["status"] for r in (results or [])}
+def check(events, directory, claims, results):
+    """Problems with the decisions, one string per problem; empty means all pass.
+    claims ({claim_id: claim}) and results are the run's: without them a
+    decision on another version or a stale status could not be caught."""
+    hashes = {cid: original(c).input_hash for cid, c in claims.items()}
+    status = {(r["claim_id"], r["rule_id"]): r["status"] for r in results}
     problems = []
     for n, e in enumerate(events, start=1):
         where = f"decision {n}"
@@ -61,29 +64,27 @@ def check(events, directory, claims=None, results=None):
             continue
         if not _iso(e["created_at"]):
             problems.append(f"{where}: created_at is not an ISO date-time")
-        if claims is not None:
-            if e["claim_id"] not in hashes:
-                problems.append(f"{where}: claim {e['claim_id']} is not in the claims file")
-                continue
-            if e["input_hash"] != hashes[e["claim_id"]]:
-                problems.append(f"{where}: taken on another version of {e['claim_id']} (input_hash differs)")
-        if results is not None:
-            current = status.get((e["claim_id"], e["rule_id"]))
-            if current not in FLAGGED:
-                problems.append(f"{where}: {e['claim_id']} {e['rule_id']} is not a finding in this run")
-            elif current != e["original_status"]:
-                problems.append(f"{where}: taken on status {e['original_status']}, but the result is now {current}")
+        if e["claim_id"] not in hashes:
+            problems.append(f"{where}: claim {e['claim_id']} is not in the claims file")
+            continue
+        if e["input_hash"] != hashes[e["claim_id"]]:
+            problems.append(f"{where}: taken on another version of {e['claim_id']} (input_hash differs)")
+        current = status.get((e["claim_id"], e["rule_id"]))
+        if current not in FLAGGED:
+            problems.append(f"{where}: {e['claim_id']} {e['rule_id']} is not a finding in this run")
+        elif current != e["original_status"]:
+            problems.append(f"{where}: taken on status {e['original_status']}, but the result is now {current}")
     return problems
 
 
-def append_decisions(decisions_path, log, *, anchor=None, directory=None, claims_path=None, results_path=None):
+def append_decisions(decisions_path, log, *, claims_path, results_path, anchor=None, directory=None):
     """Check, then append. Returns a summary; raises ValueError listing every
     problem, having written nothing."""
     events = load_jsonl(decisions_path)
     if directory is None:
         directory = {e["actor"]: "reviewer" for e in events if isinstance(e, dict) and isinstance(e.get("actor"), str)}
-    claims = {c["claim_id"]: c for c in load_jsonl(claims_path)} if claims_path else None
-    results = load_jsonl(results_path) if results_path else None
+    claims = {c["claim_id"]: c for c in load_jsonl(claims_path)}
+    results = load_jsonl(results_path)
     problems = check(events, directory, claims, results)
     if problems:
         raise ValueError("no decision appended:\n  " + "\n  ".join(problems))
@@ -101,8 +102,8 @@ def main(argv=None):
     p.add_argument("--log", required=True, help="the run's audit log")
     p.add_argument("--anchor", help="chain-head anchor (default: beside the log)")
     p.add_argument("--directory", help="JSON {actor: role}; default: every actor is a reviewer")
-    p.add_argument("--claims", help="the claims file the run read")
-    p.add_argument("--results", help="the run's results")
+    p.add_argument("--claims", required=True, help="the claims file the run read")
+    p.add_argument("--results", required=True, help="the run's results")
     a = p.parse_args(argv)
     directory = json.loads(Path(a.directory).read_text(encoding="utf-8")) if a.directory else None
     try:

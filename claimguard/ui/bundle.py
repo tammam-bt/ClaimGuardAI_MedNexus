@@ -62,20 +62,23 @@ def _audit(log, anchor):
 
 
 def _corrections(folder, claims):
-    """Attach each version written by claimguard.review.correct to its claim.
-    A version whose parent is not this run's version of the claim belongs to
-    another run or an older correction: it is listed as skipped, not shown."""
+    """Attach each version written by claimguard.review.correct to its claim,
+    following the chain: version 2's parent is this run's version of the
+    claim, version 3's parent is version 2, and so on. A version whose parent
+    is in neither belongs to another run: it is listed as skipped, not shown."""
     skipped = []
     if not folder:
         return skipped
     by_hash = {c["input_hash"]: c for c in claims}
-    for path in sorted(Path(folder).glob("*.json")):
-        record = json.loads(path.read_text(encoding="utf-8"))
-        parent = by_hash.get(record.get("parent_hash"))
-        if parent is None or parent["claim"]["claim_id"] != record.get("claim_id"):
+    loaded = [(path, json.loads(path.read_text(encoding="utf-8"))) for path in sorted(Path(folder).glob("*.json"))]
+    number = lambda r: r.get("version") if isinstance(r.get("version"), int) else 0
+    for path, record in sorted(loaded, key=lambda item: number(item[1])):  # parents before children
+        entry = by_hash.get(record.get("parent_hash"))
+        if entry is None or entry["claim"]["claim_id"] != record.get("claim_id"):
             skipped.append({"file": path.name, "why": "its parent is not this run's version of the claim"})
             continue
-        parent["versions"].append({**record, "route": route_claim(record["results"])})
+        entry["versions"].append({**record, "route": route_claim(record["results"])})
+        by_hash[record["input_hash"]] = entry
     for c in claims:
         c["versions"].sort(key=lambda v: v["version"])
     return skipped

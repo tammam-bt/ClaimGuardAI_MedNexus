@@ -17,6 +17,7 @@ from claimguard.review.correction import original
 from claimguard.run import main as run_main
 from claimguard.ui import build
 from claimguard.ui.decisions import append_decisions, check
+from claimguard.ui.decisions import main as decisions_main
 
 ROOT = Path(__file__).resolve().parents[1]
 DEV = ROOT / "data" / "development"
@@ -26,6 +27,7 @@ FIX = [{"op": "replace", "path": "/lines/0/authorization_id", "value": "AUTH-CG-
        {"op": "add", "path": "/authorizations/0", "value": {
            "authorization_id": "AUTH-CG-B39790AC3604-1", "patient_id": "PAT-64397DF099", "service_code": "SVC-IMAGE",
            "status": "approved", "valid_from": "2026-03-01", "valid_to": "2026-04-30", "max_quantity": 5}}]
+NOTE = [{"op": "replace", "path": "/notes", "value": "Called the provider."}]
 
 
 class RunCase(unittest.TestCase):
@@ -102,6 +104,16 @@ class DecisionTests(RunCase):
             self.append([self.decision()], directory={"Someone else": "reviewer"})
         self.assertEqual(self.append([self.decision()], directory={"Reviewer 01": "admin"})["appended"], 1)
 
+    def test_the_command_needs_the_runs_files(self):
+        # Without the claims and results, a decision on another version of
+        # the claim or on a stale status could not be caught, so the command
+        # refuses to run rather than append it unchecked.
+        before = self.log.read_bytes()
+        path = self.write([self.decision(input_hash="0" * 64)])
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            decisions_main(["--decisions", str(path), "--log", str(self.log)])
+        self.assertEqual(self.log.read_bytes(), before)
+
     def test_check_reports_every_problem(self):
         problems = check([self.decision(reason=""), self.decision(original_status="PASS")], {"Reviewer 01": "reviewer"},
                          {c["claim_id"]: c for c in load_jsonl(DEV / "claims.jsonl")}, load_jsonl(self.results))
@@ -148,6 +160,44 @@ class CorrectionTests(RunCase):
                               output=self.dir / "corrections", log=self.log)
         self.assertEqual(self.log.read_bytes(), before)
         self.assertFalse((self.dir / "corrections").exists())
+
+    def test_a_second_correction_makes_version_3(self):
+        corrections = self.dir / "corrections"
+        _, v2 = correct_claim(DEV / "claims.jsonl", AUTH_CLAIM, FIX, actor="Reviewer 01", reason="Authorization added.",
+                              output=corrections, log=self.log)
+        _, v3 = correct_claim(DEV / "claims.jsonl", AUTH_CLAIM, NOTE, actor="Reviewer 01", reason="Note from the provider.",
+                              output=corrections, log=self.log)
+        self.assertEqual((v3["version"], v3["parent_hash"]), (3, v2["input_hash"]))
+        self.assertEqual(v3["claim"]["lines"][0]["authorization_id"], "AUTH-CG-B39790AC3604-1")  # v2's change kept
+        self.assertEqual(v3["claim"]["notes"], "Called the provider.")
+        self.assertEqual(sorted(p.name for p in corrections.iterdir()),
+                         [f"{AUTH_CLAIM}.v2.json", f"{AUTH_CLAIM}.v3.json"])
+        versions = [row["event"]["version"] for row in load_jsonl(self.log) if row["event"]["event"] == "version_created"]
+        self.assertEqual(versions, [2, 3])
+
+    def test_a_version_file_that_does_not_follow_from_its_parent_is_refused(self):
+        corrections = self.dir / "corrections"
+        out, _ = correct_claim(DEV / "claims.jsonl", AUTH_CLAIM, FIX, actor="Reviewer 01", reason="Authorization added.",
+                               output=corrections, log=self.log)
+        record = json.loads(out.read_text(encoding="utf-8"))
+        record["claim"]["total_amount"] = 1  # edited by hand after it was recorded
+        out.write_text(json.dumps(record), encoding="utf-8")
+        before = self.log.read_bytes()
+        with self.assertRaises(ValueError):
+            correct_claim(DEV / "claims.jsonl", AUTH_CLAIM, NOTE, actor="Reviewer 01", reason="r",
+                          output=corrections, log=self.log)
+        self.assertEqual(self.log.read_bytes(), before)
+        self.assertFalse((corrections / f"{AUTH_CLAIM}.v3.json").exists())
+
+    def test_the_interface_shows_every_version(self):
+        corrections = self.dir / "corrections"
+        for changes in (FIX, NOTE):
+            correct_claim(DEV / "claims.jsonl", AUTH_CLAIM, changes, actor="Reviewer 01", reason="r",
+                          output=corrections, log=self.log)
+        data = build(self.results, DEV / "claims.jsonl", audit_log=self.log, corrections=corrections)
+        entry = next(c for c in data["claims"] if c["claim"]["claim_id"] == AUTH_CLAIM)
+        self.assertEqual([v["version"] for v in entry["versions"]], [2, 3])
+        self.assertEqual(data["corrections_skipped"], [])
 
     def test_the_interface_shows_the_version(self):
         corrections = self.dir / "corrections"

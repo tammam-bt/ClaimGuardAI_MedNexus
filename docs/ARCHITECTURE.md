@@ -83,9 +83,10 @@ flowchart LR
    - A results or explanations file changed after the run therefore no longer matches the chain.
 9. **Review.** `python -m claimguard.ui` builds one offline HTML page from the run's results, manifest, explanations and verified audit chain.
    - A reviewer decides each finding with a reason. Decisions stay in that browser until they are downloaded.
-   - `python -m claimguard.ui.decisions` checks every decision: event format, the actor's role (`claimguard.guards.rbac`), the date, that it was taken on this version of the claim, and on a finding at its current status.
+   - `python -m claimguard.ui.decisions` checks every decision against the run's claims and results, which it requires: event format, the actor's role (`claimguard.guards.rbac`), the date, that it was taken on this version of the claim, and on a finding at its current status.
    - It then appends all of them as `review_decision` events, or none.
 10. **Correct.** `python -m claimguard.review.correct` applies a JSON Patch, creating a new immutable version linked to its parent by hash.
+    - Each correction builds on the latest stored version: version 2, then 3, and so on. The stored versions are replayed from the claim as received first, and one that is not exactly its parent plus its recorded changes refuses the correction.
     - All 15 rules re-run on it, and the status changes are reported.
     - A rule that crashes is listed in the version's `rule_errors`, and the command exits with 2.
     - A `version_created` event records the version, and the page shows it after a rebuild.
@@ -117,8 +118,6 @@ flowchart LR
   Our own contract tests cover these for our results.
 - **Held-out claims outside the documented schema** (NaN, other date formats) are rejected at ingestion, so they produce no results, and the scorer would then report missing pairs. The public data contains none.
 - **Claim versions in decisions.** Review decisions carry `input_hash`. The decision-append command refuses a decision taken on another version of the claim, and the interface counts only decisions on the version it shows. `claimguard.review.routing.outstanding()` does not compare it yet, so a decision on version 1 would still count there for version 2 when the status is unchanged.
-- **The decision checks need the run's files.** Without `--claims` and `--results`, `claimguard.ui.decisions` checks only format, role and date.
-- **A second correction of the same claim** starts again from the claim as received, so it replaces version 2 instead of making version 3. Both remain in the audit log.
 - **The interface has no login.** Names and roles are self-declared, and the permission that counts is checked when decisions are appended. Drafts live in one browser until they are downloaded.
 - **AI:**
   - Only the pack's mock provider is wired; the live model awaits the team's model decision.

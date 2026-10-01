@@ -17,54 +17,17 @@ Use the development split to iterate. Score validation only on a frozen
 commit (docs/07), and never tune on it.
 """
 import argparse
-import importlib.util
 import json
 from collections import Counter
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Sequence
+from typing import Any, Dict, List, Mapping, Sequence
 
-from claimguard._pack import load_jsonl
+from claimguard._pack import load_jsonl, score
 
 EXPECTED = ("PASS", "FAIL", "UNABLE_TO_ASSESS", "NOT_APPLICABLE")
 """Gold rows. The gold never contains NOT_IMPLEMENTED."""
 PREDICTED = EXPECTED + ("NOT_IMPLEMENTED",)
 """Prediction columns. NOT_IMPLEMENTED counts as incorrect (docs/07)."""
-
-
-def _load_pack_evaluate() -> Callable:
-    """Return score() from the pack's src/evaluate.py.
-
-    TEMPORARY, pending Tammam (ADR-001: claimguard/_pack.py is the only module
-    that may touch src/, and _pack.py is "never touch" without him). This is
-    the one place outside _pack.py that reads src/, and it only reads.
-
-    TODO(Tammam): move this into claimguard/_pack.py, then delete this function.
-    In _pack.py, after the `from engine_core import (...)` block, add:
-
-        import importlib.util
-        _spec = importlib.util.spec_from_file_location("claimguard_pack_evaluate", _SRC / "evaluate.py")
-        _evaluate = importlib.util.module_from_spec(_spec)
-        _spec.loader.exec_module(_evaluate)
-        index, score = _evaluate.index, _evaluate.score
-
-    add "index" and "score" to __all__, and here replace
-    `score = _load_pack_evaluate()` with `from claimguard._pack import score`.
-
-    Why by file path, not `from evaluate import score`: _pack appends src/ to
-    the END of sys.path, so an installed package named evaluate (Hugging
-    Face's) would be imported instead of the pack's scorer. The file-path
-    load cannot be shadowed. evaluate.py does `from engine_core import ...`,
-    which resolves because importing claimguard._pack above put src/ on
-    sys.path.
-    """
-    path = Path(__file__).resolve().parents[2] / "src" / "evaluate.py"
-    spec = importlib.util.spec_from_file_location("claimguard_pack_evaluate", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.score
-
-
-score = _load_pack_evaluate()
 
 
 def confusion_by_rule(

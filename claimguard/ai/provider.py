@@ -13,7 +13,7 @@ checking that it is present, and never logged.
 """
 import os
 
-from ._adapter import MockExplanationProvider
+from claimguard._pack import MockExplanationProvider
 
 DEFAULT_TIMEOUT_S = 20.0
 

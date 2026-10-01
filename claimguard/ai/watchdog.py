@@ -33,7 +33,7 @@ import re
 import threading
 import time
 
-from ._adapter import validate_explanation
+from claimguard._pack import validate_explanation
 from .minimize import minimize
 
 _APPROVAL = re.compile(

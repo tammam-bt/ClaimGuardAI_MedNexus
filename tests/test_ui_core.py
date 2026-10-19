@@ -63,6 +63,14 @@ class ConsistencyTests(unittest.TestCase):
         flat = [i for icons in tables.values() for i in icons]
         self.assertEqual(len(flat), len(set(flat)), tables)
 
+    def test_every_watchdog_reason_has_a_label(self):
+        # A fallback the page cannot name would show the raw code to a reviewer.
+        reasons = set(re.findall(r'_Failure\("([a-z_]+)"',
+                                 (ROOT / "claimguard" / "ai" / "watchdog.py").read_text(encoding="utf-8")))
+        block = re.search(r"const FAILURE = \{(.*?)\n  \};", CORE.read_text(encoding="utf-8"), re.S).group(1)
+        self.assertIn("clinical_advice", reasons)
+        self.assertEqual(set(re.findall(r"^\s*([a-z_]+):", block, re.M)), reasons)
+
     def test_navigation_icons_are_unique(self):
         icons = {}
         for name, text in js_sources().items():

@@ -35,8 +35,17 @@ const SettingsPage = (function () {
       h("p", { class: "muted small", text: "Your name is recorded with each decision." })) });
   }
 
+  // The safeguards hold whichever provider runs (claimguard/ai/minimize.py,
+  // watchdog.py), so they are listed even with the mock.
   function aiCard() {
-    return card({ title: "AI explanations", body: h("p", { class: "small", text: explainerLine() }) });
+    return card({ title: "AI explanations", body: h("div", { class: "stack" },
+      h("p", { class: "small", text: explainerLine() }),
+      h("p", { class: "small", text: "The model sees one finding and its rule, never the claim: no claim number, notes or " +
+        "document text, and patient and member numbers replaced by placeholders such as [patient-1]." }),
+      h("p", { class: "small", text: "An answer is rejected, and the rule's own explanation shown instead, when:" }),
+      h("ul", { class: "small", style: { margin: "0", paddingLeft: "18px" } },
+        Object.values(Core.FAILURE).map((label) => h("li", { text: label }))),
+      h("p", { class: "muted small", text: "A rejected answer is never shown or stored." })) });
   }
 
   function rbacCard() {

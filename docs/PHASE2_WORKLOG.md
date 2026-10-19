@@ -4,9 +4,9 @@ What was audited, built, fixed and decided for Phase 2 (Integration and Testing,
 
 | | |
 |---|---|
-| Roles done | A Evaluation · B Robustness and FHIR · D Review gate · E Privacy and access |
-| Role open | C AI guards: the clinical-advice check (C1) is the one Phase 2 requirement still missing |
-| Tests | 493, all passing on Python 3.14, including 19 headless-Chrome tests; the new suites also pass on Python 3.11. CI runs 3.10 and 3.12. |
+| Roles done | A Evaluation · B Robustness and FHIR · D Review gate · E Privacy and access · C AI guards (C1 clinical-advice check, C2 exercises through every guard, pseudonymized identifiers in the model's view) |
+| Role C open | C3 live provider (later phase: the mentor gives the key; Phase 2 is mock only), C4 manual scorecard |
+| Tests | 505, all passing on Python 3.14, including 19 headless-Chrome tests; the new suites also pass on Python 3.11. CI runs 3.10 and 3.12. |
 | Pack integrity | `python src/validate_pack.py`: PASS. No starter-pack file changed. |
 | Scores | Status accuracy 1.000, macro F1 1.000 and 0 false alarms on all three public splits (details below) |
 | Author | Mohammed Aziz Kadri, with an AI coding assistant (see the end of this log) |
@@ -32,7 +32,7 @@ A fresh clone of `b40f0b5` passed 418 tests, and the engine scored 1.000 on ever
 |---|---|
 | No macro F1; `rules/rules.json` has no category | Confirmed |
 | `templates/Evaluation_Report.md` is empty | Confirmed |
-| The AI watchdog accepts clinical advice | Confirmed: 4 of 4 probes accepted |
+| The AI watchdog accepts clinical advice | Confirmed: 4 of 4 probes accepted. Fixed by C1: all 4 now fall back |
 | `routing.outstanding()` ignores the claim version | Confirmed; it also accepted unknown actors |
 | `ui/decisions.py` makes everyone a reviewer by default | Confirmed |
 | One claim that fails ingestion voids the scored run | Confirmed: "15 missing pairs", run rejected |
@@ -128,9 +128,8 @@ The starter baseline scores macro F1 0.200 over rules on validation and sends al
 
 | Item | Owner |
 |---|---|
-| **C1**: a clinical-advice check in `claimguard/ai/watchdog.py` (the last missing Phase 2 requirement) | Role C |
-| C2: run the 25 exercises through every guard, for the report | Role C |
-| Pseudonymize identifiers in the model's view | Role C |
+| C3: a live provider behind `select_provider`, in a later phase, once the mentor gives the key. Phase 2 is mock only | Role C |
+| C4: a hand-filled copy of the manual scorecard under `docs/` | Role C |
 | Decisions on a corrected version (today a corrected claim that still flags findings stays "rechecked") | Role D |
 | `.github/README.md`: show `--directory` and the new commands; validation and stress in CI | Tammam |
 | Mentor answers: the 50-claim set, the category grouping, `--complete` for the held-out run, the confidence wording, `lines` that is not a list | Team |

@@ -436,7 +436,7 @@ function eventSummary(e) {
     case "ingestion_error": return `${e.stage}: ${e.reason}`;
     case "injection_flag":
       return `${Core.plural(e.hits.length, "hit")}: ${Array.from(new Set(e.hits.map((x) => Core.FAMILY[x.family] || x.family))).join("; ")}`;
-    case "model_failure": return `${e.rule_id} · ${e.reason}${e.detail ? ": " + e.detail : ""}`;
+    case "model_failure": return `${e.rule_id} · ${Core.FAILURE[e.reason] || e.reason}${e.detail ? ": " + e.detail : ""}`;
     case "review_decision":
       return `${e.rule_id} · ${(Core.ACTION[e.action] || { label: e.action }).label} by ${e.actor}: ${e.reason}`;
     case "version_created":

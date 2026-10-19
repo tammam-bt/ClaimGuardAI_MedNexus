@@ -99,6 +99,7 @@ python -m claimguard.review.gate --results outputs/dev_predictions.jsonl --claim
 - The page loads nothing from the network and sends nothing, and its Content-Security-Policy makes the browser enforce it: no request, image, font, frame or form can leave the page. The decisions download still works.
 - The API key is never written to the run's files, so it is never part of the page.
 - Claims flagged by the injection pre-filter are marked, keep their 15 results, and their text never reaches the model.
+- An explanation the watchdog rejected is labelled *Rule's explanation (AI answer rejected)*, and the reason is given in plain words: no answer in time, the model service failed, an unreadable answer, an incomplete answer or one citing something it was not given, a failed check called passed, clinical advice, or another rule named. The rejected answer itself is never shown. Settings lists these reasons and what the model never sees (claim number, notes, document text, and patient and member numbers, replaced by placeholders such as `[patient-1]`).
 
 ## Consistency, enforced by tests
 
@@ -106,6 +107,7 @@ python -m claimguard.review.gate --results outputs/dev_predictions.jsonl --claim
 |---|---|
 | Every icon named in the page exists in `static/icons.svg`; statuses, routes, actions and explanation sources never share an icon; the seven navigation icons differ | `tests/test_ui_core.py` |
 | Every colour is a token in `:root`; no external resource; no HTML-parsing API | `tests/test_ui_core.py` |
+| Every reason the watchdog can reject an AI answer for has a plain-language label in the page | `tests/test_ui_core.py` |
 | Every text colour meets WCAG AA (4.5:1) on its background; the focus ring 3:1 | `tests/test_ui_contrast.py` |
 | A claim's stage, computed in the page, matches `claimguard.review.routing.outstanding` | `tests/test_ui_core.py` (Node) |
 | A claim's outcome in the page matches the gate's | `tests/test_ui_core.py` (Node) |
@@ -134,5 +136,5 @@ The Node and Chrome tests are skipped where Node or Chrome is not installed.
 - No login: names and roles are self-declared (doc 10).
 - Drafts live in one browser until downloaded; another browser does not see them.
 - No time series: one run has no history, so there are no trend lines.
-- Explanations come from the mock until a live provider is wired (`claimguard/ai/provider.py`).
+- Phase 2 is mock only: explanations are the rule's own text until the mentor gives the model key in a later phase and a live provider is wired (`claimguard/ai/provider.py`). With a live model, an explanation can name a patient or member only by its placeholder (`[patient-1]`); the finding's evidence still shows the real value.
 - The page shows the run it was built from; it cannot start a run. Rebuild after each run, decision append or correction.

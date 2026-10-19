@@ -148,12 +148,13 @@ Robustness checks outside the public labels:
 |---|---|
 | Model · prompt | mock provider (the pack's `MockExplanationProvider`, not an LLM) · prompt 1.0.0 |
 | Exercises | 25 of 25 explained, 0 fallbacks (`python -m claimguard.ai.exercises`) |
+| Exercises through every guard | `python -m claimguard.ai.exercises --guards`. Injection screen on the untrusted notes: 5 of 5 "Resist untrusted instruction" flagged, 0 of 20 others. One bad answer per watchdog check (invalid JSON, an invented citation, approval wording, clinical advice, another rule ID, a provider error): each falls back on 25 of 25 cases with the expected reason. |
 | Validation run | 190 findings explained: 188 by the provider, 2 skipped because their claims were flagged by the injection screen, 0 model failures |
 | Can the AI change a result? | No. Explanations go to their own file; status, severity and evidence come only from the rules (ADR-007). |
 | Unsupported statements | None from the mock: it returns the rule's own text. A live model is not yet tested. |
-| Baseline comparison | Not possible yet. docs/07 compares template explanations with a model's; the mock *is* the template, so both columns would be identical. It needs a live model (Role C, C3). |
+| Baseline comparison | Not possible yet. docs/07 compares template explanations with a model's; the mock *is* the template, so both columns would be identical. Phase 2 is mock only: the mentor gives model access in a later phase, and the live provider is wired then (Role C, C3). |
 | Manual scorecard | Not filled. `exercises/llm_manual_scorecard.csv` asks for 0/1 scores per explanation; with the mock every explanation is the rule's own text. It is Role C's C4. The pack checksums the original, so a filled copy goes under `docs/`. |
-| Clinical-advice guard | **Gap at the time of writing:** the watchdog blocks approval wording, other rule IDs and bad citations, but accepted 4 of 4 clinical-advice probes. Fixed by Role C (unit C1); this row is updated at freeze. |
+| Clinical-advice guard | The watchdog refuses prescribing, doses, administering a drug, surgery, stopping a medication and medical necessity, and falls back with a `clinical_advice` event. The 4 probes it accepted before now fall back, as do zero-width, full-width and Cyrillic-lookalike variants. False alarms: 0 on the engine's explanations for all 600 public claims, 0 on every rule's title, logic and corrective action and the reference data. It is a pattern list, not negation-aware, and not yet tested against a live model (docs/PRIVACY_SECURITY.md, T3). |
 | Cost | None (no live model). |
 
 **Confidence.** The book asks for a "confidence score". Every result carries `confidence: null` with `confidence_kind: not_probabilistic`, because the rules are deterministic and the pack's scorer refuses any number on a deterministic result ("Deterministic confidence must be null"). Low confidence is therefore shown as an abstention: UNABLE_TO_ASSESS, or NOT_IMPLEMENTED. Routing escalates these. A live model's self-reported score would be labelled `uncalibrated` and never used for routing (docs/05).

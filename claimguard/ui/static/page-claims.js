@@ -133,7 +133,8 @@ const ClaimDetail = (function () {
   }
   function explanationLabel(x) {
     const s = Core.SOURCE[x.kind] || Core.SOURCE.mock;
-    const why = x.kind === "fallback" && x.record && x.record.failure ? `The AI answer was rejected (${x.record.failure.reason}).`
+    const why = x.kind === "fallback" && x.record && x.record.failure
+      ? `The AI answer was rejected: ${(Core.FAILURE[x.record.failure.reason] || x.record.failure.reason).toLowerCase()}.`
       : x.kind === "skipped_flagged" ? "This claim was flagged for injection, so its findings were never sent to the model." : null;
     return badge(s.label, { tone: s.tone, icon: s.icon, title: why });
   }

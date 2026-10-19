@@ -57,6 +57,18 @@ const Core = (function () {
     skipped_flagged: { label: "Withheld from the model", icon: "shield-alert", tone: "neutral" },
   };
 
+  // Why the watchdog rejected an AI answer (claimguard/ai/watchdog.py). The
+  // reviewer then sees the rule's own text.
+  const FAILURE = {
+    timeout: "No answer in time",
+    model_error: "The model service failed",
+    invalid_json: "The answer was unreadable",
+    invalid_output: "The answer was incomplete or cited something it was not given",
+    status_contradiction: "The answer said a failed check had passed",
+    clinical_advice: "The answer gave clinical advice",
+    unknown_rule: "The answer named another rule",
+  };
+
   // Where a claim is in its life cycle once routed.
   const OUTCOME = {
     ready: { label: "Ready for submission", icon: "send", tone: "clear",
@@ -395,7 +407,7 @@ const Core = (function () {
   }
 
   return {
-    STATUS, STATUS_ORDER, ROUTE, ROUTE_ORDER, SEVERITY, ACTION, ACTION_ORDER, SOURCE, OUTCOME, OUTCOME_ORDER, STAGES,
+    STATUS, STATUS_ORDER, ROUTE, ROUTE_ORDER, SEVERITY, ACTION, ACTION_ORDER, SOURCE, FAILURE, OUTCOME, OUTCOME_ORDER, STAGES,
     FAMILY, EVENT, outstanding, latestDecisions, outcome, statusCounts, lifecycle, funnel, runStages, findings, decisionEvent,
     number, money, date, datetime, percent, shortHash, plural, count, humanize, fieldLabel, plain,
   };

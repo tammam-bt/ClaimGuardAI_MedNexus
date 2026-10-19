@@ -116,6 +116,34 @@ class CoreLogicTests(unittest.TestCase):
             js = node("Core.outstanding(input.routing, input.events)", {"routing": routing, "events": events})
             self.assertEqual(js, outstanding(routing, events), events)
 
+    def test_outcome_matches_the_gate(self):
+        # The page shows a state; claimguard.review.gate enforces it. Both
+        # must name the same state for the same claim and decisions.
+        from claimguard.review.gate import outcome
+        reasons = [{"rule_id": "R003", "status": "FAIL", "severity": "high"},
+                   {"rule_id": "R010", "status": "UNABLE_TO_ASSESS", "severity": "medium"}]
+        route = {"claim_id": "CG-1", "route": "ESCALATE", "reasons": reasons}
+        ev = lambda rule, action, status, h="H1", actor="A": {
+            "claim_id": "CG-1", "rule_id": rule, "action": action, "actor": actor, "reason": "r",
+            "original_status": status, "input_hash": h}
+        dismiss_both = [ev("R003", "dismiss_with_reason", "FAIL"), ev("R010", "dismiss_with_reason", "UNABLE_TO_ASSESS")]
+        cases = [
+            ([], False, route),
+            ([], False, {**route, "route": "CLEAR", "reasons": []}),
+            ([ev("R003", "dismiss_with_reason", "FAIL")], False, route),
+            (dismiss_both, False, route),
+            ([ev("R003", "dismiss_with_reason", "FAIL", h="H0"), dismiss_both[1]], False, route),  # other version
+            ([ev("R003", "confirm_issue", "FAIL")], False, route),
+            ([ev("R010", "request_information", "UNABLE_TO_ASSESS")], False, route),
+            ([ev("R003", "mark_corrected_for_recheck", "FAIL")], False, route),
+            ([ev("R003", "dismiss_with_reason", "FAIL", actor=" ")], False, route),
+            (dismiss_both, True, route),  # a corrected version replaces this one
+        ]
+        for events, versions, r in cases:
+            entry = {"route": r, "input_hash": "H1", "versions": [{"version": 2}] if versions else []}
+            js = node("Core.outcome(input.entry, input.events)", {"entry": entry, "events": events})
+            self.assertEqual(js, outcome(r, events, "H1", has_versions=versions), (events, versions))
+
     def entry(self, reasons, flag=None):
         results = [{"rule_id": f"R{i:03}", "status": "PASS"} for i in range(1, 16)]
         for r in reasons:

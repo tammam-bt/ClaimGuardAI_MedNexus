@@ -95,6 +95,19 @@ class ChainTests(unittest.TestCase):
                 append(self.log, [review(), bad], self.anchor)
         self.assertFalse(self.log.exists())
 
+    def test_a_batch_that_cannot_be_recorded_writes_nothing(self):
+        # A reviewer's reason is free text: a lone surrogate passes JSON but
+        # cannot be hashed or written as UTF-8. Before the fix the valid event
+        # in front of it was written and the anchor was not updated.
+        self.three()
+        log, anchor = self.log.read_bytes(), Path(self.anchor).read_bytes()
+        for bad in (review(reason="bad \ud800 reason"), review(reason={"not", "json"})):
+            with self.subTest(bad=type(bad["reason"]).__name__), self.assertRaises(AuditError):
+                append(self.log, [review(claim_id="CG-OK"), bad], self.anchor)
+            self.assertEqual(self.log.read_bytes(), log)
+            self.assertEqual(Path(self.anchor).read_bytes(), anchor)
+        self.assertEqual(verify(self.log, self.anchor)[1], 3)
+
     def test_cannot_append_to_a_broken_chain(self):
         self.three()
         self.log.write_text(self.log.read_text(encoding="utf-8").replace("CG-1", "CG-9"), encoding="utf-8")

@@ -139,6 +139,20 @@ class CliTests(RunCase):
         self.assertEqual((summary["claims"], summary["audit_valid"], summary["evaluation"]), (50, True, True))
         self.assertEqual(len(page_data(out.read_text(encoding="utf-8"))["claims"]), 50)
 
+    def test_the_browser_enforces_no_network(self):
+        # A Content-Security-Policy turns "the page loads and sends nothing"
+        # from a convention into a browser rule: even text that slipped into
+        # the page could not fetch, load or post anything.
+        page = render(build(self.results, STRESS / "claims.jsonl"))
+        m = re.search(r'<meta http-equiv="Content-Security-Policy" content="([^"]+)">', page)
+        self.assertIsNotNone(m)
+        policy = {d.split()[0]: d.split()[1:] for d in m.group(1).split("; ")}
+        self.assertEqual(policy["default-src"], ["'none'"])
+        self.assertNotIn("connect-src", policy)  # falls back to 'none'
+        self.assertEqual((policy["base-uri"], policy["form-action"]), (["'none'"], ["'none'"]))
+        self.assertTrue(all("http" not in " ".join(v) for v in policy.values()))
+        self.assertLess(page.index("Content-Security-Policy"), page.index("<script"))
+
 
 if __name__ == "__main__":
     unittest.main()

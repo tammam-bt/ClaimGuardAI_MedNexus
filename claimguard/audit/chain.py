@@ -100,19 +100,28 @@ def verify(log, anchor: Optional[str] = None) -> Tuple[str, int]:
 
 
 def append(log, events: Sequence[Mapping[str, Any]], anchor: Optional[str] = None) -> Tuple[str, int]:
-    """Append events after verifying the chain; update the anchor. All or nothing."""
+    """Append events after verifying the chain; update the anchor. All or nothing:
+    every row is hashed and encoded before the first byte is written, so an
+    event that cannot be recorded (text that is not valid Unicode, a value
+    that is not JSON) refuses the whole batch with AuditError."""
     head, count = verify(log, anchor)
     for event in events:
         _check(event)
+    lines: List[bytes] = []
+    for position, event in enumerate(events, start=1):
+        row = {"sequence": count + 1, "recorded_at": datetime.now(timezone.utc).isoformat(),
+               "previous_hash": head, "event": dict(event)}
+        try:
+            head = digest(row)
+            lines.append((json.dumps({**row, "hash": head}, ensure_ascii=False) + "\n").encode("utf-8"))
+        except (TypeError, ValueError) as e:  # UnicodeEncodeError is a ValueError
+            raise AuditError(f"event {position} of the batch cannot be recorded ({type(e).__name__}); "
+                             "nothing was written") from None
+        count += 1
     path = Path(log)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8", newline="\n") as fh:
-        for event in events:
-            row = {"sequence": count + 1, "recorded_at": datetime.now(timezone.utc).isoformat(),
-                   "previous_hash": head, "event": dict(event)}
-            head = digest(row)
-            fh.write(json.dumps({**row, "hash": head}, ensure_ascii=False) + "\n")
-            count += 1
+    with path.open("ab") as fh:
+        fh.write(b"".join(lines))
     if anchor:
         Path(anchor).parent.mkdir(parents=True, exist_ok=True)
         Path(anchor).write_text(json.dumps({"count": count, "head": head}) + "\n", encoding="utf-8")

@@ -3,7 +3,7 @@
     python -m claimguard.review.correct --claims data/development/claims.jsonl \\
         --claim-id CG-B39790AC3604 --changes fix.json \\
         --actor "Reviewer 01" --reason "Authorization added from the source record." \\
-        --log outputs/audit.jsonl --output outputs/corrections
+        --directory actors.json --log outputs/audit.jsonl --output outputs/corrections
 
 fix.json is a list of JSON Patch operations (replace, add into an array,
 remove from an array), as claimguard.review.correction accepts them:
@@ -29,15 +29,19 @@ command exits with 2.
 
 A correction that changes nothing, a blank actor or reason, an invalid
 operation, an edit to an identifier, or a corrected claim that fails the
-transport contract is refused, and nothing is written (DEC-011).
+transport contract is refused, and nothing is written (DEC-011). So is a
+correction by an actor who is not in --directory with a role that may
+mark_corrected_for_recheck (claimguard.guards.rbac): the version and its
+audit event would otherwise carry any name typed on the command line.
 """
 import argparse
 import json
 import re
 from pathlib import Path
 
-from claimguard._pack import load_jsonl
 from claimguard.audit import chain
+from claimguard.guards.rbac import PermissionDenied, authorize, load_directory
+from claimguard.ingest.jsonl import claims_by_id
 from claimguard.review.correction import correct, original, recheck, rule_engine
 
 
@@ -65,9 +69,15 @@ def latest_version(claim, folder):
     return version
 
 
-def correct_claim(claims_path, claim_id, changes, *, actor, reason, output, log=None, anchor=None):
-    """Recheck one correction; returns the written record. Raises ValueError, writing nothing."""
-    claims = {c["claim_id"]: c for c in load_jsonl(claims_path)}
+def correct_claim(claims_path, claim_id, changes, *, actor, reason, directory, output, log=None, anchor=None):
+    """Recheck one correction; returns the written record. Raises ValueError, writing nothing.
+    directory is {actor: role}; the actor must be in it with a role that may
+    mark_corrected_for_recheck."""
+    try:
+        authorize(directory, actor, "mark_corrected_for_recheck")
+    except PermissionDenied as e:
+        raise ValueError(f"not permitted: {e}") from None
+    claims = claims_by_id(claims_path)
     if claim_id not in claims:
         raise ValueError(f"claim {claim_id} is not in {claims_path}")
     if not isinstance(changes, list):
@@ -92,6 +102,7 @@ def main(argv=None):
     p.add_argument("--changes", required=True, help="JSON file: a list of JSON Patch operations")
     p.add_argument("--actor", required=True)
     p.add_argument("--reason", required=True)
+    p.add_argument("--directory", required=True, help="JSON {actor: role}, e.g. actors.example.json")
     p.add_argument("--output", default="outputs/corrections")
     p.add_argument("--log", help="audit log to record the version in")
     p.add_argument("--anchor")
@@ -99,7 +110,8 @@ def main(argv=None):
     try:
         changes = json.loads(Path(a.changes).read_text(encoding="utf-8"))
         out, record = correct_claim(a.claims, a.claim_id, changes, actor=a.actor, reason=a.reason,
-                                    output=a.output, log=a.log, anchor=a.anchor)
+                                    directory=load_directory(a.directory), output=a.output, log=a.log,
+                                    anchor=a.anchor)
     except (ValueError, chain.AuditError) as e:
         print(f"Correction refused: {e}")
         return 1

@@ -31,7 +31,7 @@ flowchart LR
     UI["Review interface ✓<br/>one offline page"]
     DEC["Decision append ✓<br/>format · role · version · status"]
     COR["Correction → new version → recheck ✓"]
-    GATE["Autonomy gate ◻"]
+    GATE["Autonomy gate ✓<br/>ready · blocked, exit code"]
   end
   IN --> ING --> RUN
   RUN --> POL
@@ -41,6 +41,8 @@ flowchart LR
   UI -- downloaded decisions --> DEC
   UI --> COR
   COR -- new version --> RUN
+  AUD -. verified decisions .-> GATE
+  ROUTE --> GATE
   RES -. finding and its evidence only .-> MIN --> EXP --> WD -. explanation text only .-> UI
   SCR -. flagged claims never reach .-> MIN
   TXT -. data never instructions .-> SCR
@@ -90,6 +92,11 @@ flowchart LR
     - All 15 rules re-run on it, and the status changes are reported.
     - A rule that crashes is listed in the version's `rule_errors`, and the command exits with 2.
     - A `version_created` event records the version, and the page shows it after a rebuild.
+11. **Gate.** `python -m claimguard.review.gate` decides which claims may proceed, and is the one place approval is enforced.
+    - It trusts only the verified audit chain and the actor directory.
+    - Each claim is judged on its latest version. It is ready when nothing is flagged, or when every flagged finding was dismissed with a reason, by an actor the directory allows, on that version and that status.
+    - Otherwise it is blocked, in the page's own words (to review, in review, correction needed, waiting for information, awaiting recheck, rechecked), or rejected or not checked.
+    - Exit code 0 when all are ready, 1 while any is blocked, 2 when the chain or inputs cannot be trusted.
 
 ## Tool permissions
 
@@ -105,6 +112,8 @@ flowchart LR
 | Decision append | downloaded decisions, claims, results, a role directory | `review_decision` events | append any decision of a file in which one fails a check |
 | Correction | a claim version | a new version, its results, a `version_created` event | edit the original; change `claim_id`, `schema_version`, `line_id`; patch a result |
 | Audit chain | its log and anchor | appends only | rewrite or delete rows |
+| Gate | results, claims, the verified audit chain, the actor directory, corrections | a ready / blocked row per claim, an exit code | count an unverified chain, an unknown actor or a decision on another version |
+| Feedback summary | the verified audit chain | decision counts and rules often dismissed | change a rule |
 
 ## Known limitations
 
@@ -116,9 +125,9 @@ flowchart LR
   - evidence `true` where the claim says `1`.
 
   Our own contract tests cover these for our results.
-- **Held-out claims outside the documented schema** (NaN, other date formats) are rejected at ingestion, so they produce no results, and the scorer would then report missing pairs. The public data contains none.
-- **Claim versions in decisions.** Review decisions carry `input_hash`. The decision-append command refuses a decision taken on another version of the claim, and the interface counts only decisions on the version it shows. `claimguard.review.routing.outstanding()` does not compare it yet, so a decision on version 1 would still count there for version 2 when the status is unchanged.
-- **The interface has no login.** Names and roles are self-declared, and the permission that counts is checked when decisions are appended. Drafts live in one browser until they are downloaded.
+- **Held-out claims outside the documented schema** (NaN, other date formats) are rejected at ingestion, so by default they produce no results, and the scorer then rejects the whole run for missing pairs. `--complete` gives each such claim 15 UNABLE_TO_ASSESS results instead, so the run stays scorable (DEC-013). A claim whose `lines` is not a list of objects makes the pack's scorer itself fail, whatever the predictions. The public data contains none of these.
+- **Claim versions in decisions.** Review decisions carry `input_hash`. The decision-append command refuses a decision taken on another version of the claim; the interface, `routing.outstanding(input_hash=…)` and the gate count only decisions on the version they judge. Decisions can be recorded on the claim as received only: a corrected version that still flags findings stays blocked ("rechecked") until the corrected claim is run and reviewed.
+- **The interface has no login.** Names and roles are self-declared in the page. The permission that counts is checked against a required actor directory (`--directory`) when decisions are appended and when corrections are recorded. The directory names actors but cannot prove who typed a name. Drafts live in one browser until they are downloaded.
 - **AI:**
   - Only the pack's mock provider is wired; the live model awaits the team's model decision.
   - The injection screen covers English and some French. An instruction in other words or languages can pass it, which is why model output is validated separately and can never change a result.

@@ -4,11 +4,12 @@ Record any clarification or disagreement about a rule **before** changing expect
 
 ## Open questions for the mentor
 
-1. Can a held-out claim fall outside `claim.schema.json` — contain NaN or Infinity (DEC-003), or a date that is not `YYYY-MM-DD` (DEC-010)? If so, what are its expected results? A rejected claim produces no results, so the scorer would report missing pairs.
+1. Can a held-out claim fall outside `claim.schema.json` — contain NaN or Infinity (DEC-003), or a date that is not `YYYY-MM-DD` (DEC-010)? If so, what are its expected results? A rejected claim produces no results, so the scorer would report missing pairs. DEC-013 adds `--complete`, which gives such a claim 15 UNABLE_TO_ASSESS results: may we use it for the held-out run?
 2. Should a high-severity UNABLE_TO_ASSESS escalate like a FAIL, and should dismissing a high-severity finding need a second reviewer (DEC-004)?
 3. Where does "route low-confidence or high-severity cases for explicit human approval" come from? It is not in the starter pack.
 4. Is it acceptable that exercise notes (`untrusted_note`) never reach the model, by design?
-5. Please confirm each "team decision" in DEC-001 to DEC-012.
+5. Please confirm each "team decision" in DEC-001 to DEC-013.
+6. Can a held-out claim's `lines` be something other than a list of objects (null, a string)? `src/evaluate.py` then raises `TypeError` while checking line IDs, on any predictions, ours included (DEC-013).
 
 ## DEC-000 | Template
 
@@ -65,6 +66,11 @@ Record any clarification or disagreement about a rule **before** changing expect
   - On the public gold labels this routes development 201 ESCALATE / 63 REVIEW / 136 CLEAR, validation 75 / 22 / 53, stress 25 / 13 / 12.
 - **Resolution:** Team proposal, to confirm with the mentor. Open points: (1) should a high-severity UNABLE_TO_ASSESS escalate like a FAIL (we say yes: "coverage could not be checked" is as risky as "coverage failed")? (2) Should dismissing a high-severity finding need a second reviewer? We require one named reviewer; the review page has no authentication, so any second approver would be self-declared. (3) Should an LLM failure escalate the claim? Routing reads deterministic results only, so today it does not; the fallback is logged instead.
 - **Change made:** `claimguard/review/routing.py` (`ROUTING_POLICY_VERSION = "1.0.0"`), `tests/test_routing.py`.
+- **Update 2026-10-19 (routing policy 1.1.0; the route table is unchanged):**
+  - Each reason now names its `triggers`, in the challenge book's Phase 2 words ("flags low-confidence or high-severity cases for explicit human approval"): `low_confidence` (UNABLE_TO_ASSESS or NOT_IMPLEMENTED), `high_severity` (the rule's severity), `issue` (a proven FAIL).
+  - `outstanding()` takes the claim version (`input_hash`) and the actor directory, so a dismissal on version 1, or by an actor who may not act, never approves.
+  - "Explicit approval" is now enforced by `python -m claimguard.review.gate`, which exits non-zero while any claim is blocked. Its states are the page's own (`Core.outcome`), kept equal by a Node test.
+  - Open point (2) stands: one named reviewer per dismissal.
 
 ## DEC-005 | R009 failure reasons the gold never shows
 
@@ -175,3 +181,20 @@ Record any clarification or disagreement about a rule **before** changing expect
   2. **A non-object entry in `authorizations` or `attachments` is unreadable.** docs/03 calls a wrong structural type an ingestion error to quarantine, but `validate_transport()` does not check array items, and ingestion (Role 5, U1.6) does not quarantine them yet. The rules therefore skip unreadable entries when matching, and an unreadable entry could be exactly the record or document being looked for, so it can never prove absence: where a line would fail "Authorization record not found" or "Matching required document absent", it is UNABLE_TO_ASSESS "Authorization inventory unreadable" / "Attachment inventory unreadable" instead. Proven mismatches on readable records still FAIL.
 - **Resolution:** Team decision, to confirm with the mentor. Quarantining such claims at ingestion (Role 5) remains the better place; the rules must not crash either way.
 - **Change made:** `EXACT` in `claimguard/rules/_common.py`, used by `r007.py`, `r009.py`, `r012.py`; unreadable entries in `r009.py`, `r010.py`; tests in `tests/test_r007.py`, `test_r009.py`, `test_r010.py`, `test_r012.py`.
+
+## DEC-013 | A claim rejected at ingestion still gets 15 results, with --complete
+
+- **Date / author:** 2026-10-19 / Mohammed Aziz Kadri
+- **Rule:** all (run level, `python -m claimguard.run`)
+- **Question:** docs/07: "The scorer requires every claim-rule pair exactly once. Missing pairs […] are rejected." Ingestion rejects a claim outside the documented contract (DEC-003, DEC-010, DEC-012). That claim then has no results, and the scorer rejects the **whole run**, not one claim. What should a rejected held-out claim return?
+- **Smallest example:** validation claim CG-BC77D328F1A2 with one unexpected envelope key. Without the option: "Prediction coverage mismatch: 15 missing pairs", run rejected. With it: the run is scored, status accuracy 0.993, 15 false abstentions.
+- **Expected (gold) vs our reading:** No public claim is rejected, so the gold is silent. Our reading: the claim could not be checked, which is UNABLE_TO_ASSESS by the rulebook's own definition. Never PASS: an unchecked claim must not look clean.
+  - `--complete` gives each such claim 15 UNABLE_TO_ASSESS results with `requires_human_review`. Each cites only `/claim_id`, the one value certain to match the claim the scorer reads. The explanation says the check did not run, and the corrective action says to fix the record and re-run. Routing sends the claim to ESCALATE.
+  - **Which claims:** the ones the scorer will read. For JSONL, every JSON object with a string `claim_id` in `--input`. For FHIR, every such object in `--sidecar`, the file the scorer reads; a bundle whose ID is not there is never completed. For a CSV folder, which the scorer never reads, the IDs of rejected claims; orphan rows are excluded. IDs are read directly from the file, because ingestion keeps unusual IDs out of its error records and those claims need results too.
+  - **Never:** a pair for an accepted claim (no duplicates), a result for a line that is not a JSON object (the scorer cannot read it either), or completion together with `--limit` (refused).
+  - Off by default. The run still exits 2 and lists every rejection; the manifest names the completed IDs in `completed_rejected`.
+- **Found with it, fixed in the same change:** a string holding a lone surrogate (`"\ud800"`, legal JSON) passed ingestion and the rules, then crashed the results write (`UnicodeEncodeError`): no results at all. `run.py` now writes such a row with ASCII escapes. It reads back as the identical value, so the scorer's evidence check still matches. Other rows stay byte-identical.
+- **The review tools survive it too.** Before this change, one malformed claim in the claims file made `python -m claimguard.ui.decisions` fail for every decision, even with `--complete` off. It hashed every claim through the pack's `validate_transport`, which raises `ValueError`, or `TypeError` for a non-object line. With `--complete`, `python -m claimguard.ui` crashed the same way. Now both read the claims with `claims_by_id()`, which skips lines nothing can use. A claim the ingestion contract rejects has no version: the page lists it under "Rejected at ingestion" only, and a decision on it is refused with "rejected at ingestion; correct the record and re-run before deciding". `python -m claimguard.review.correct` already refuses such a claim with a reason; the fix belongs at the source, then a re-run.
+- **Not fixable on our side:** a claim whose `lines` is not a list of objects makes `src/evaluate.py` raise `TypeError` on every prediction file, ours included (open question 6).
+- **Resolution:** Team decision, pending the mentor (open question 1). Default if no answer: use `--complete` for the held-out run and disclose it in the evaluation report.
+- **Change made:** `complete_rejected()`, `scored_claim_ids()` and `_dumps()` in `claimguard/run.py`; `claims_by_id()` in `claimguard/ingest/jsonl.py`; `version_hash()` in `claimguard/ui/decisions.py`, also used by `claimguard/ui/bundle.py`. Tests: `CompleteOutputTests` in `tests/test_run_cli.py`; `test_malformed_input_matrix` and `test_one_bad_bundle_never_costs_the_others` in `tests/test_fhir.py`; the seeded sweeps in `tests/test_ingest_fuzz.py`; `tests/test_rejected_claims.py`.

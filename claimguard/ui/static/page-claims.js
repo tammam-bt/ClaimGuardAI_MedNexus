@@ -226,6 +226,9 @@ const ClaimDetail = (function () {
     return box;
   }
 
+  // Why a finding needs a human (routing triggers), in the challenge's words.
+  const TRIGGER_LABEL = { low_confidence: "low confidence", high_severity: "high severity", issue: "proven issue" };
+
   function routeCallout(entry) {
     const route = entry.route;
     if (!route.reasons.length) {
@@ -238,7 +241,8 @@ const ClaimDetail = (function () {
       body: h("div", { class: "row", style: { marginTop: "8px" } }, route.reasons.map((x) =>
         h("a", { href: `#finding-${x.rule_id}`, class: "badge tone-neutral", style: { textDecoration: "none" },
           onClick: (ev) => { ev.preventDefault(); scrollToId(`finding-${x.rule_id}`); } },
-        `${x.rule_id} · ${Core.STATUS[x.status].label} · ${x.severity}`))) });
+        `${x.rule_id} · ${Core.STATUS[x.status].label} · ` +
+        ((x.triggers || []).map((t) => TRIGGER_LABEL[t] || t).join(", ") || x.severity)))) });
   }
 
   function flagCallout(entry) {

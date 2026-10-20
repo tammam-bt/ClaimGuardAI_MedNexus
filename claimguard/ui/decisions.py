@@ -2,7 +2,8 @@
 
     python -m claimguard.ui.decisions --decisions review_decisions_d8c76c1c.jsonl \\
         --log outputs/audit.jsonl --directory actors.json \\
-        --results outputs/dev_predictions.jsonl --claims data/development/claims.jsonl
+        --results outputs/dev_predictions.jsonl --claims data/development/claims.jsonl \\
+        [--corrections outputs/corrections]
 
 Every decision is checked before anything is written, and one bad decision
 writes nothing:
@@ -16,6 +17,10 @@ writes nothing:
     on that finding's current status (original_status). A decision taken on
     an older result is refused rather than recorded as if it were current.
     Both files are required, so these checks always run.
+  - with --corrections (the folder python -m claimguard.review.correct
+    writes), "this version" is the claim's latest version and "current
+    status" its rechecked result, exactly as the review gate judges it. A
+    decision on an older version is refused: a correction replaces it.
 
 A decision already in the chain is skipped, so appending the same file twice
 adds nothing. --directory is required: a JSON file naming each actor's role
@@ -33,6 +38,7 @@ from claimguard._pack import load_jsonl
 from claimguard.audit import chain
 from claimguard.guards.rbac import PermissionDenied, authorize_event, load_directory
 from claimguard.ingest.jsonl import claims_by_id
+from claimguard.review.correct import latest_results
 from claimguard.review.correction import version_hash
 
 FIELDS = frozenset(chain.EVENT_FIELDS["review_decision"] | {"event"})
@@ -48,12 +54,29 @@ def _iso(value):
         return False
 
 
-def check(events, directory, claims, results):
-    """Problems with the decisions, one string per problem; empty means all pass.
-    claims ({claim_id: claim}) and results are the run's: without them a
-    decision on another version or a stale status could not be caught."""
+def _current(claims, results, corrections):
+    """({claim_id: input_hash}, {(claim_id, rule_id): status}) of the version
+    a reviewer decides on: the claim as received, or its latest corrected
+    version. Raises ValueError if a stored version does not follow."""
     hashes = {cid: version_hash(c) for cid, c in claims.items()}
     status = {(r["claim_id"], r["rule_id"]): r["status"] for r in results}
+    if corrections:
+        for cid, claim in claims.items():
+            if hashes[cid] is None:
+                continue
+            version, stored = latest_results(claim, corrections)
+            if stored is not None:
+                hashes[cid] = version.input_hash
+                status.update({(cid, r["rule_id"]): r["status"] for r in stored})
+    return hashes, status
+
+
+def check(events, directory, claims, results, corrections=None):
+    """Problems with the decisions, one string per problem; empty means all pass.
+    claims ({claim_id: claim}) and results are the run's: without them a
+    decision on another version or a stale status could not be caught.
+    corrections is the folder of corrected versions, if any."""
+    hashes, status = _current(claims, results, corrections)
     problems = []
     for n, e in enumerate(events, start=1):
         where = f"decision {n}"
@@ -84,14 +107,14 @@ def check(events, directory, claims, results):
     return problems
 
 
-def append_decisions(decisions_path, log, *, claims_path, results_path, directory, anchor=None):
+def append_decisions(decisions_path, log, *, claims_path, results_path, directory, anchor=None, corrections=None):
     """Check, then append. Returns a summary; raises ValueError listing every
     problem, having written nothing. directory is {actor: role}: required,
     since without one there is no role to check."""
     events = load_jsonl(decisions_path)
     claims = claims_by_id(claims_path)
     results = load_jsonl(results_path)
-    problems = check(events, directory, claims, results)
+    problems = check(events, directory, claims, results, corrections)
     if problems:
         raise ValueError("no decision appended:\n  " + "\n  ".join(problems))
     anchor = anchor or chain.default_anchor(log)
@@ -110,11 +133,13 @@ def main(argv=None):
     p.add_argument("--directory", required=True, help="JSON {actor: role}, e.g. actors.example.json")
     p.add_argument("--claims", required=True, help="the claims file the run read")
     p.add_argument("--results", required=True, help="the run's results")
+    p.add_argument("--corrections", help="folder written by python -m claimguard.review.correct: "
+                                         "decide on each claim's latest version")
     a = p.parse_args(argv)
     try:
         directory = load_directory(a.directory)
         summary = append_decisions(a.decisions, a.log, anchor=a.anchor, directory=directory,
-                                   claims_path=a.claims, results_path=a.results)
+                                   claims_path=a.claims, results_path=a.results, corrections=a.corrections)
     except (ValueError, chain.AuditError) as e:
         print(e)
         return 1

@@ -82,7 +82,7 @@ const Core = (function () {
     awaiting_recheck: { label: "Awaiting recheck", icon: "refresh", tone: "unknown",
       help: "The source was corrected; the claim must run again as a new version." },
     rechecked: { label: "Rechecked as a new version", icon: "refresh", tone: "info",
-      help: "A corrected version was checked again by all 15 rules; its results are shown with the claim." },
+      help: "A corrected version was checked again by all 15 rules and still has findings: decide them on that version." },
   };
   const OUTCOME_ORDER = ["to_review", "in_review", "waiting_information", "correction_needed", "awaiting_recheck", "rechecked", "ready"];
 
@@ -152,10 +152,24 @@ const Core = (function () {
     return pending;
   }
 
+  // The version a reviewer decides on: the newest corrected version
+  // (python -m claimguard.review.correct), else the claim as received. It has
+  // the entry's shape, so every function below reads either the same way, and
+  // current(current(x)) is current(x). Mirrors claimguard.review.gate.judge.
+  // A corrected version was never explained, so it has no explanations.
+  function current(entry) {
+    const versions = entry.versions || [];
+    if (!versions.length) return Object.assign({}, entry, { version: entry.version || 1 });
+    const v = versions[versions.length - 1];
+    return Object.assign({}, entry, { version: v.version, claim: v.claim, input_hash: v.input_hash,
+      results: v.results, route: v.route, explanations: null, versions: [] });
+  }
+
   // The latest valid decision per finding, for display. Same validity as
   // outstanding(), plus: a decision taken on another version of the claim
   // (another input_hash) does not count.
   function latestDecisions(entry, events) {
+    entry = current(entry);
     const latest = {};
     for (const e of events) {
       if (e.claim_id !== entry.route.claim_id || e.input_hash !== entry.input_hash) continue;
@@ -170,29 +184,34 @@ const Core = (function () {
     return out;
   }
 
+  // The claim's state, judged on its current version. A corrected version
+  // replaces the older ones: their decisions no longer count, and until one
+  // of its own findings is decided it is "rechecked".
   function outcome(entry, events) {
-    const reasons = entry.route.reasons;
-    if (reasons.length === 0) return "ready";
-    // A corrected version replaces this one: its own results decide next.
-    if (entry.versions && entry.versions.length) return "rechecked";
+    entry = current(entry);
+    if (entry.route.reasons.length === 0) return "ready";
     const valid = events.filter((e) => e.input_hash === entry.input_hash);
     const actions = Object.values(latestDecisions(entry, valid)).map((e) => e.action);
     if (actions.includes("mark_corrected_for_recheck")) return "awaiting_recheck";
     if (actions.includes("request_information")) return "waiting_information";
     if (actions.includes("confirm_issue")) return "correction_needed";
     if (outstanding(entry.route, valid).length === 0) return "ready";
-    return actions.length ? "in_review" : "to_review";
+    if (actions.length) return "in_review";
+    return entry.version > 1 ? "rechecked" : "to_review";
   }
 
-  // The findings a reviewer decides on: the results the route names, in rule
-  // order, each with its result row.
+  // The findings a reviewer decides on: the results the current version's
+  // route names, in rule order, each with its result row.
   function findings(entry) {
+    entry = current(entry);
     const byRule = new Map(entry.results.map((r) => [r.rule_id, r]));
     return entry.route.reasons.map((reason) => ({ reason, result: byRule.get(reason.rule_id) }));
   }
 
-  // A review_decision event as claimguard/audit/chain.py records it.
+  // A review_decision event as claimguard/audit/chain.py records it, taken on
+  // the current version of the claim.
   function decisionEvent(entry, result, action, actor, reason, createdAt) {
+    entry = current(entry);
     return {
       event: "review_decision",
       claim_id: entry.route.claim_id,
@@ -213,6 +232,7 @@ const Core = (function () {
   }
 
   function lifecycle(entry, events) {
+    entry = current(entry);
     const c = statusCounts(entry.results);
     const p = entry.provenance;
     const flagged = !!entry.flag;
@@ -223,7 +243,8 @@ const Core = (function () {
     const result = outcome(entry, events);
 
     let explained;
-    if (ex === null || ex === undefined) explained = { state: "skipped", summary: "Not run" };
+    if (entry.version > 1) explained = { state: "skipped", summary: `Not run on v${entry.version}` };
+    else if (ex === null || ex === undefined) explained = { state: "skipped", summary: "Not run" };
     else if (toExplain === 0) explained = { state: "skipped", summary: "Nothing to explain" };
     else if (flagged) explained = { state: "skipped", summary: "Withheld from the model" };
     else {
@@ -276,7 +297,7 @@ const Core = (function () {
     const results = claims.reduce((n, c) => n + c.results.length, 0);
     const ruleErrors = run ? run.rule_errors.length : 0;
     const ai = run && run.ai ? run.ai.summary : null;
-    const routed = claims.filter((c) => c.route.reasons.length);
+    const routed = claims.map(current).filter((c) => c.route.reasons.length);
     const total = routed.reduce((n, c) => n + c.route.reasons.length, 0);
     const decided = routed.reduce((n, c) => n + Object.keys(latestDecisions(c, events)).length, 0);
     const ready = f.outcomes.ready;
@@ -408,7 +429,7 @@ const Core = (function () {
 
   return {
     STATUS, STATUS_ORDER, ROUTE, ROUTE_ORDER, SEVERITY, ACTION, ACTION_ORDER, SOURCE, FAILURE, OUTCOME, OUTCOME_ORDER, STAGES,
-    FAMILY, EVENT, outstanding, latestDecisions, outcome, statusCounts, lifecycle, funnel, runStages, findings, decisionEvent,
+    FAMILY, EVENT, current, outstanding, latestDecisions, outcome, statusCounts, lifecycle, funnel, runStages, findings, decisionEvent,
     number, money, date, datetime, percent, shortHash, plural, count, humanize, fieldLabel, plain,
   };
 })();

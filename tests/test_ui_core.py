@@ -135,6 +135,8 @@ class CoreLogicTests(unittest.TestCase):
             "claim_id": "CG-1", "rule_id": rule, "action": action, "actor": actor, "reason": "r",
             "original_status": status, "input_hash": h}
         dismiss_both = [ev("R003", "dismiss_with_reason", "FAIL"), ev("R010", "dismiss_with_reason", "UNABLE_TO_ASSESS")]
+        on_v2 = [dict(e, input_hash="H2") for e in dismiss_both]
+        clean = {**route, "route": "CLEAR", "reasons": []}
         cases = [
             ([], False, route),
             ([], False, {**route, "route": "CLEAR", "reasons": []}),
@@ -145,12 +147,22 @@ class CoreLogicTests(unittest.TestCase):
             ([ev("R010", "request_information", "UNABLE_TO_ASSESS")], False, route),
             ([ev("R003", "mark_corrected_for_recheck", "FAIL")], False, route),
             ([ev("R003", "dismiss_with_reason", "FAIL", actor=" ")], False, route),
-            (dismiss_both, True, route),  # a corrected version replaces this one
+            # A corrected version (H2) replaces the claim as received (H1).
+            (dismiss_both, True, route),  # decisions on v1 no longer count
+            ([], True, route),
+            (on_v2[:1], True, route),
+            (on_v2, True, route),  # decided on v2: ready
+            ([dict(ev("R003", "confirm_issue", "FAIL"), input_hash="H2")], True, route),
+            (dismiss_both, True, clean),  # the correction cleared every finding
         ]
         for events, versions, r in cases:
-            entry = {"route": r, "input_hash": "H1", "versions": [{"version": 2}] if versions else []}
+            if versions:  # the gate is given the latest version, the page the entry that holds it
+                entry = {"route": route, "input_hash": "H1", "results": [],
+                         "versions": [{"version": 2, "route": r, "input_hash": "H2", "results": [], "claim": {}}]}
+            else:
+                entry = {"route": r, "input_hash": "H1", "versions": []}
             js = node("Core.outcome(input.entry, input.events)", {"entry": entry, "events": events})
-            self.assertEqual(js, outcome(r, events, "H1", has_versions=versions), (events, versions))
+            self.assertEqual(js, outcome(r, events, "H2" if versions else "H1", has_versions=versions), (events, versions))
 
     def entry(self, reasons, flag=None):
         results = [{"rule_id": f"R{i:03}", "status": "PASS"} for i in range(1, 16)]
@@ -176,8 +188,19 @@ class CoreLogicTests(unittest.TestCase):
         self.assertEqual(self.outcome(e, [d("R003", "confirm_issue"), d("R010", "request_information")]), "waiting_information")
         self.assertEqual(self.outcome(e, [d("R010", "request_information"), d("R003", "mark_corrected_for_recheck")]),
                          "awaiting_recheck")
-        # Once a corrected version exists, its own results decide next.
-        self.assertEqual(self.outcome(dict(e, versions=[{"version": 2}]), [d("R003", "mark_corrected_for_recheck")]), "rechecked")
+        # Once a corrected version exists, its own results decide next: v1's
+        # decisions stop counting, and v2's findings are decided on v2.
+        v2 = dict(e, versions=[{"version": 2, "input_hash": "h2", "claim": {}, "results": e["results"], "route": e["route"]}])
+        self.assertEqual(self.outcome(v2, [d("R003", "mark_corrected_for_recheck")]), "rechecked")
+        self.assertEqual(self.outcome(v2, [d("R003", "dismiss_with_reason", "h2")]), "in_review")
+        self.assertEqual(self.outcome(v2, [d("R003", "dismiss_with_reason", "h2"), d("R010", "dismiss_with_reason", "h2")]),
+                         "ready")
+        cleared = dict(e, versions=[{"version": 2, "input_hash": "h2", "claim": {}, "results": [],
+                                     "route": {"claim_id": "CG-1", "route": "CLEAR", "reasons": []}}])
+        self.assertEqual(self.outcome(cleared, []), "ready")
+        # The page's decision is taken on v2.
+        event = node("Core.decisionEvent(input.entry, input.entry.results[2], 'confirm_issue', ' A ', 'r', 't')", {"entry": v2})
+        self.assertEqual((event["input_hash"], event["claim_id"], event["actor"]), ("h2", "CG-1", "A"))
         # A decision taken on another version of the claim does not count.
         self.assertEqual(self.outcome(e, [d("R003", "dismiss_with_reason", "h0"), d("R010", "dismiss_with_reason", "h0")]),
                          "to_review")

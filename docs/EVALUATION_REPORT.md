@@ -2,18 +2,18 @@
 
 Phase 2 deliverable: "Test evaluation report (detection metrics, F1 score, false positive rate, latency, and limitations)", CSTAM 3.0 Challenge Book, Velodoc, Phase 2. Sections follow `templates/Evaluation_Report.md`, which stays untouched because the pack checksums it.
 
-> **Status: draft.** Numbers come from the working tree on top of `b40f0b5`, run on 19 Oct 2026. They are refreshed from the frozen commit before hand-in; any change is listed under Reproduction.
+> **Status: frozen for the Phase 2 hand-in** at tag `phase2-freeze`. The detection numbers were re-run from that tag on 20 Oct 2026 and are unchanged from the 19 Oct runs. The latency figures are the 19 Oct measurements: the code changes since then touch only the review commands, never the run.
 
 ## Team · commit · pack version · run date
 
 | | |
 |---|---|
 | Team | MedNexus |
-| Commit | `b40f0b5` + Phase 2 working tree · frozen commit: **to fill at freeze** |
+| Commit | tag `phase2-freeze` on branch `mak/phase2-role-c-ai-guards` (PRs #29 and #30), built on `main` at `b40f0b5` |
 | Pack | ClaimGuard AI starter pack 1.0.0, `SHA256SUMS.json` sha256 `a24a7c72…14ba`, `validate_pack.py` PASS |
 | Engine | `claimguard` 0.1.0, 15 of 15 rules, rule versions 1.0.0 |
 | AI | mock provider only (`model: null`), prompt 1.0.0, timeout 20 s |
-| Run date | 2026-10-19 |
+| Run date | 2026-10-19 (latency), 2026-10-20 (re-run from the frozen tag) |
 
 ## Reproduction
 
@@ -152,8 +152,8 @@ Robustness checks outside the public labels:
 | Validation run | 190 findings explained: 188 by the provider, 2 skipped because their claims were flagged by the injection screen, 0 model failures |
 | Can the AI change a result? | No. Explanations go to their own file; status, severity and evidence come only from the rules (ADR-007). |
 | Unsupported statements | None from the mock: it returns the rule's own text. A live model is not yet tested. |
-| Baseline comparison | Not possible yet. docs/07 compares template explanations with a model's; the mock *is* the template, so both columns would be identical. Phase 2 is mock only: the mentor gives model access in a later phase, and the live provider is wired then (Role C, C3). |
-| Manual scorecard | Not filled. `exercises/llm_manual_scorecard.csv` asks for 0/1 scores per explanation; with the mock every explanation is the rule's own text. It is Role C's C4. The pack checksums the original, so a filled copy goes under `docs/`. |
+| Baseline comparison | Half done. docs/07 compares template explanations with a model's on the same cases. The scorecard below is the template column. The model column waits for model access, which the mentor gives in a later phase (Role C, C3). |
+| Manual scorecard | Filled (C4): `docs/AI_SCORECARD.md`, card `docs/llm_manual_scorecard_mock.csv`. Correct finding 24/25, evidence 25/25, rule 25/25, appropriate action 0/25, honest uncertainty 22/25, unsupported facts 0. The mock never suggests a verification step: the page shows the rule's corrective action beside it instead. On 3 of the 5 uncertainty cases it does not say which field is missing. These two gaps are the live model's targets. The mechanical columns are recomputed by `tests/test_scorecard.py`. A second teammate still has to check the judged columns. |
 | Clinical-advice guard | The watchdog refuses prescribing, doses, administering a drug, surgery, stopping a medication and medical necessity, and falls back with a `clinical_advice` event. The 4 probes it accepted before now fall back, as do zero-width, full-width and Cyrillic-lookalike variants. False alarms: 0 on the engine's explanations for all 600 public claims, 0 on every rule's title, logic and corrective action and the reference data. It is a pattern list, not negation-aware, and not yet tested against a live model (docs/PRIVACY_SECURITY.md, T3). |
 | Cost | None (no live model). |
 
@@ -167,9 +167,11 @@ Covered in full by the privacy and security note, `docs/PRIVACY_SECURITY.md`: th
 
 **Explicit human approval is enforced, not only shown.** `python -m claimguard.review.gate` reads the verified audit chain and the actor directory, judges each claim on its latest version, and exits non-zero while any claim is blocked. With no decisions recorded it reports 136 ready and 264 blocked on development, the same as the page's dashboard. Its states are the page's own, kept equal by a Node test (`tests/test_gate.py`, `tests/test_ui_core.py`). Each flagged finding names its triggers (low confidence, high severity, proven issue), the words of the challenge's Phase 2. `python -m claimguard.review.feedback` summarizes the recorded decisions and lists the rules reviewers often dismiss.
 
+**A corrected claim is reviewed on its new version.** `python -m claimguard.review.correct` reruns all 15 rules on a corrected version. If that version still has findings, the page shows "Deciding on version N" with that version's findings, checks and data. `python -m claimguard.ui.decisions --corrections` accepts decisions taken on that version and refuses any taken on an older one. The gate then judges the claim on it. Earlier, such a claim stayed "rechecked" and could never be approved (`test_gate.test_a_corrected_version_that_still_flags_is_decided_on_that_version`).
+
 A malformed claim in the claims file no longer stops the review tools. The page lists it under "Rejected at ingestion", decisions on the other claims are appended, and a decision on it is refused with a reason (`tests/test_rejected_claims.py`, DEC-013).
 
-Full suite with Roles A, B, D and E: 493 tests, OK, including the 19 browser end-to-end tests.
+Full suite at the frozen tag: 510 tests, OK, including the 19 browser end-to-end tests.
 
 ## Limitations
 
@@ -177,8 +179,8 @@ Full suite with Roles A, B, D and E: 493 tests, OK, including the 19 browser end
 - **Small positive counts.** Validation has 117 FAIL pairs. R006 has 10, and some rules have fewer. One error would move a rule's F1 a lot, which is why per-rule and per-category figures are shown, not only the mean.
 - **Undefined F1 on stress** for 9 rules and the duplicate category; they are listed, not averaged in.
 - **The category grouping is ours**, pending the mentor's confirmation. Macro F1 over rules does not depend on it.
-- **Ingestion failure voids a scored run** (case 5) until the mentor decides what a rejected held-out record should return.
-- **Mock model only.** No live-model quality, latency or cost has been measured, and the clinical-advice guard is not proven against a real model.
+- **A rejected held-out claim** (case 5) voids a scored run unless the run uses `--complete`. With `--complete` its 15 results are UNABLE_TO_ASSESS and count as abstentions. Whether to use it on the held-out run waits on the mentor (DEC-013); our default is to use it and disclose it.
+- **Mock model only.** No live-model quality, latency or cost has been measured, and the clinical-advice guard is not proven against a real model. The mock's own scorecard shows its limits: no verification step, and the missing field not named on 3 of 5 uncertainty cases.
 - **Latency** is one laptop, one process, mock explanations.
 - **The scorer checks statuses and evidence values, not meaning.** A correct status for the wrong reason would score.
 

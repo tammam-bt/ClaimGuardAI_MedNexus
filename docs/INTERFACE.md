@@ -68,14 +68,20 @@ python -m claimguard.review.correct --claims data/development/claims.jsonl --cla
 - The stored versions are replayed from the claim as received first. A version file that is not exactly its parent plus its recorded changes refuses the correction, and nothing is written.
 - The new version runs through all 15 rules, and a `version_created` event is recorded.
 
-Rebuild with `--corrections outputs/corrections`: the claim shows *Rechecked as a new version*, and for every version what changed, the status changes and its new route. A correction never forces a pass: wrong data stays a finding.
+Rebuild with `--corrections outputs/corrections`: the claim shows every version, with what changed, the status changes and its new route. A correction never forces a pass: wrong data stays a finding.
+
+If the latest version still has findings, the claim is *Rechecked as a new version* and the reviewer decides them on that version:
+- the claim page says *Deciding on version N* and shows that version's findings, checks and data; the claim as received is still shown unchanged;
+- each decision is taken on that version's `input_hash`, so a decision on an older version no longer counts;
+- append the downloaded decisions with the same folder: `python -m claimguard.ui.decisions ... --corrections outputs/corrections`. Without it, the command judges the claim as received and refuses decisions on the new version; with it, it refuses decisions on any older version.
 
 ## The gate: what may proceed
 
 The page shows each claim's state but enforces nothing: decisions are drafts until appended. The gate enforces it:
 
 ```bash
-python -m claimguard.review.gate --results outputs/dev_predictions.jsonl --claims data/development/claims.jsonl     --log outputs/audit.jsonl --directory actors.json --corrections outputs/corrections --output outputs/gate.jsonl
+python -m claimguard.review.gate --results outputs/dev_predictions.jsonl --claims data/development/claims.jsonl \
+    --log outputs/audit.jsonl --directory actors.json --corrections outputs/corrections --output outputs/gate.jsonl
 ```
 
 - It verifies the audit chain first; a chain that does not verify judges nothing (exit 2).

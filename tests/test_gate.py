@@ -14,7 +14,7 @@ from pathlib import Path
 
 from claimguard._pack import load_jsonl
 from claimguard.audit import chain
-from claimguard.review.correct import correct_claim
+from claimguard.review.correct import correct_claim, latest_version
 from claimguard.review.correction import original
 from claimguard.review.gate import GateError, judge, main
 from claimguard.run import main as run_main
@@ -81,7 +81,7 @@ class ScenarioTests(GateCase):
         self.run_claims([lines[AUTH_CLAIM], lines[self.clean]])
         self.hash = original(json.loads(lines[AUTH_CLAIM])).input_hash
 
-    def decide(self, action, rules=("R008", "R009"), actor="Reviewer 01", input_hash=None):
+    def decide(self, action, rules=("R008", "R009"), actor="Reviewer 01", input_hash=None, corrections=None):
         status = {r["rule_id"]: r["status"] for r in load_jsonl(self.results) if r["claim_id"] == AUTH_CLAIM}
         events = [{"event": "review_decision", "claim_id": AUTH_CLAIM, "rule_id": rule, "action": action,
                    "actor": actor, "reason": "Checked at the source.", "created_at": "2026-10-19T10:00:00Z",
@@ -89,7 +89,7 @@ class ScenarioTests(GateCase):
         path = self.dir / f"decisions_{action}_{len(rules)}.jsonl"
         path.write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
         append_decisions(path, self.log, claims_path=self.claims, results_path=self.results,
-                         directory={actor: "reviewer"})
+                         directory={actor: "reviewer"}, corrections=corrections)
 
     def correct(self, changes):
         correct_claim(self.claims, AUTH_CLAIM, changes, actor="Reviewer 01", directory=DIRECTORY, reason="r",
@@ -117,6 +117,26 @@ class ScenarioTests(GateCase):
         auth = next(r for r in rows if r["claim_id"] == AUTH_CLAIM)
         self.assertEqual((auth["state"], auth["version"], auth["route"]), ("ready", 3, "CLEAR"))
         self.assertEqual(self.gate(*corrections), 0)
+
+    def test_a_corrected_version_that_still_flags_is_decided_on_that_version(self):
+        folder = self.dir / "corrections"
+        self.correct(NOTE)  # version 2: both findings remain
+        v2 = latest_version(json.loads(self.claims.read_text(encoding="utf-8").splitlines()[0]), folder)
+        self.assertEqual(self.states(corrections=folder)[AUTH_CLAIM], "rechecked")
+
+        # A decision on the claim as received is refused once v2 exists ...
+        with self.assertRaisesRegex(ValueError, "another version"):
+            self.decide("dismiss_with_reason", corrections=folder)
+        # ... and one on v2 is accepted and counts.
+        self.decide("dismiss_with_reason", rules=("R008",), input_hash=v2.input_hash, corrections=folder)
+        self.assertEqual(self.states(corrections=folder)[AUTH_CLAIM], "in_review")
+        self.decide("dismiss_with_reason", rules=("R009",), input_hash=v2.input_hash, corrections=folder)
+        rows = judge(self.results, self.claims, self.log, DIRECTORY, corrections=folder)
+        auth = next(r for r in rows if r["claim_id"] == AUTH_CLAIM)
+        self.assertEqual((auth["state"], auth["version"], auth["pending"]), ("ready", 2, []))
+        self.assertEqual(self.gate("--corrections", str(folder)), 0)
+        # Without the corrections folder the gate judges v1, where nothing was dismissed.
+        self.assertEqual(self.states()[AUTH_CLAIM], "to_review")
 
     def test_states_follow_the_latest_decision(self):
         for action, state in (("confirm_issue", "correction_needed"), ("request_information", "waiting_information"),

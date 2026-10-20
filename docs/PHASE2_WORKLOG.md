@@ -4,9 +4,10 @@ What was audited, built, fixed and decided for Phase 2 (Integration and Testing,
 
 | | |
 |---|---|
-| Roles done | A Evaluation · B Robustness and FHIR · D Review gate · E Privacy and access · C AI guards (C1 clinical-advice check, C2 exercises through every guard, pseudonymized identifiers in the model's view) |
-| Role C open | C3 live provider (later phase: the mentor gives the key; Phase 2 is mock only), C4 manual scorecard |
-| Tests | 505, all passing on Python 3.14, including 19 headless-Chrome tests; the new suites also pass on Python 3.11. CI runs 3.10 and 3.12. |
+| Roles done | A Evaluation · B Robustness and FHIR · D Review gate, including decisions on a corrected version · E Privacy and access · C AI guards (C1 clinical-advice check, C2 exercises through every guard, pseudonymized identifiers in the model's view, C4 manual scorecard) |
+| Role C open | C3 live provider (later phase: the mentor gives the key; Phase 2 is mock only) |
+| Frozen | tag `phase2-freeze`, 20 Oct 2026 (section 10) |
+| Tests | 510, all passing on Python 3.14, including 19 headless-Chrome tests. CI runs 3.10 and 3.12. |
 | Pack integrity | `python src/validate_pack.py`: PASS. No starter-pack file changed. |
 | Scores | Status accuracy 1.000, macro F1 1.000 and 0 false alarms on all three public splits (details below) |
 | Author | Mohammed Aziz Kadri, with an AI coding assistant (see the end of this log) |
@@ -129,11 +130,10 @@ The starter baseline scores macro F1 0.200 over rules on validation and sends al
 | Item | Owner |
 |---|---|
 | C3: a live provider behind `select_provider`, in a later phase, once the mentor gives the key. Phase 2 is mock only | Role C |
-| C4: a hand-filled copy of the manual scorecard under `docs/` | Role C |
-| Decisions on a corrected version (today a corrected claim that still flags findings stays "rechecked") | Role D |
-| `.github/README.md`: show `--directory` and the new commands; validation and stress in CI | Tammam |
+| C4: a second teammate checks the judged columns of `docs/llm_manual_scorecard_mock.csv` | Role C |
+| Merge PRs #29 and #30 into `main` (merge commits, so the tag stays in `main`'s history) | Tammam |
 | Mentor answers: the 50-claim set, the category grouping, `--complete` for the held-out run, the confidence wording, `lines` that is not a list | Team |
-| Freeze: tag the commit, re-run the numbers into the report and the note, run once from a fresh clone on another laptop | Team |
+| Run once from a fresh clone on another laptop | Team |
 
 ## 9. New commands
 
@@ -148,7 +148,19 @@ python -m claimguard.ui.decisions ... --directory actors.json      # now require
 python -m claimguard.review.correct ... --directory actors.json    # now required
 ```
 
-## 10. Use of AI coding tools
+## 10. Finishing Phase 2 · 20 October 2026
+
+| Item | What was done |
+|---|---|
+| C4 manual scorecard | `docs/AI_SCORECARD.md` and `docs/llm_manual_scorecard_mock.csv`: the 25 exercises scored on the five criteria of docs/07, with the rubric written down. Finding 24/25, evidence 25/25, rule 25/25, action 0/25, uncertainty 22/25, no unsupported fact. `tests/test_scorecard.py` recomputes the mechanical columns from a fresh run, and checks that the write-up's totals match the card. |
+| Decisions on a corrected version (Role D) | A corrected version that still flagged findings could never be approved: the page stopped at "rechecked", and the decision command accepted only the claim as received. Now the page decides on the latest version (`Core.current`), `python -m claimguard.ui.decisions --corrections` checks decisions against it, and the gate judges it. A decision on an older version is refused. |
+| Page and gate disagreed | A correction that cleared every finding showed "Rechecked" on the page while the gate said ready, because the page judged version 1. Both now judge the latest version, and the parity test covers versions. |
+| README and CI | `.github/README.md` lists the Phase 2 commands, `--directory` and the deliverables. CI also scores validation and stress. |
+| Freeze | The numbers were re-run from the tag on all three splits and are unchanged. The report and the note name the tag. |
+
+Checked in a real browser on a two-claim run: correct, rebuild, dismiss both v2 findings on the page, append, gate. The command refuses those decisions without `--corrections` and accepts them with it. The gate then exits 0, and the pack's `src/audit.py --verify` accepts the chain.
+
+## 11. Use of AI coding tools
 
 CSTAM allows AI tools if the team understands, validates and can explain every line (`CONTRIBUTING.md`, section 7). This Phase 2 work was produced with Claude Code, an AI coding assistant, directed and reviewed by Mohammed Aziz Kadri:
 - Every change was written test-first or with its test.

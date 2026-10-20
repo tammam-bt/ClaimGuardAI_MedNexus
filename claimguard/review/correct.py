@@ -69,6 +69,18 @@ def latest_version(claim, folder):
     return version
 
 
+def latest_results(claim, folder):
+    """(version, results): the newest version of claim in folder, as
+    latest_version replays it, and the 15 results stored with it; results is
+    None for the claim as received, whose results are the run's. This is the
+    version a reviewer decides on. Raises ValueError like latest_version."""
+    version = latest_version(claim, folder)
+    if version.version == 1:
+        return version, None
+    record = json.loads((Path(folder) / f"{version.claim_id}.v{version.version}.json").read_text(encoding="utf-8"))
+    return version, record["results"]
+
+
 def correct_claim(claims_path, claim_id, changes, *, actor, reason, directory, output, log=None, anchor=None):
     """Recheck one correction; returns the written record. Raises ValueError, writing nothing.
     directory is {actor: role}; the actor must be in it with a role that may

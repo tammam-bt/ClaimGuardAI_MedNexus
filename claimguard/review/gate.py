@@ -10,10 +10,12 @@ enforcement. It trusts only the verified audit chain and the actor directory,
 and exits non-zero while any claim is blocked, so whatever comes next (a
 submission script, a hand-off) can refuse to proceed.
 
-A claim is READY when its latest version's 15 results flag nothing (a clean
-pre-check, never payer approval), or when every flagged finding has an
-explicit dismissal with a reason by an actor the directory allows, taken on
-that version of the claim and on the finding's current status
+A claim is judged on its latest version: the claim as received, or with
+--corrections the newest version python -m claimguard.review.correct wrote.
+It is READY when that version's 15 results flag nothing (a clean pre-check,
+never payer approval), or when every flagged finding has an explicit
+dismissal with a reason by an actor the directory allows, taken on that
+version of the claim and on the finding's current status
 (claimguard.review.routing.outstanding with input_hash and directory).
 
 Otherwise it is BLOCKED, in the page's own words (outcome() below is the twin
@@ -24,9 +26,10 @@ of Core.outcome in claimguard/ui/static/core.js, kept equal by a Node test):
   correction_needed    a finding was confirmed
   waiting_information  information was requested
   awaiting_recheck     marked corrected; record the correction to recheck it
-  rechecked            a corrected version still flags findings. Decisions
-                       are recorded on the claim as received, so review it in
-                       a run of the corrected claim
+  rechecked            a corrected version still flags findings and none of
+                       them has a decision yet. Decide them on that version:
+                       rebuild the page with --corrections, and append with
+                       python -m claimguard.ui.decisions --corrections
 and, for claims the page never shows:
   rejected             ingestion rejected the claim: there is no version to
                        decide on (DEC-013)
@@ -48,7 +51,7 @@ from claimguard._pack import load_jsonl
 from claimguard.audit import chain
 from claimguard.guards.rbac import PermissionDenied, authorize, load_directory
 from claimguard.ingest.jsonl import claims_by_id
-from claimguard.review.correct import latest_version
+from claimguard.review.correct import latest_results
 from claimguard.review.correction import version_hash
 from claimguard.review.routing import outstanding, route_claim
 
@@ -78,8 +81,6 @@ def outcome(route: Mapping[str, Any], events: Sequence[Mapping[str, Any]], input
     adds the one check the page cannot make: the actor's role."""
     if not route["reasons"]:
         return READY
-    if has_versions:
-        return "rechecked"
     valid = [e for e in events if e.get("claim_id") == route["claim_id"] and e.get("input_hash") == input_hash
              and _counts(e, directory)]
     latest: Dict[Any, Mapping[str, Any]] = {}
@@ -93,7 +94,9 @@ def outcome(route: Mapping[str, Any], events: Sequence[Mapping[str, Any]], input
             return state
     if not outstanding(route, valid, input_hash=input_hash, directory=directory):
         return READY
-    return "in_review" if actions else "to_review"
+    if actions:
+        return "in_review"
+    return "rechecked" if has_versions else "to_review"
 
 
 def _decisions(log, anchor) -> List[Mapping[str, Any]]:
@@ -137,14 +140,12 @@ def judge(results_path, claims_path, log, directory: Mapping[str, str], *, ancho
         version, claim_results = 1, by_claim[claim_id]
         if corrections:
             try:
-                latest = latest_version(claim, corrections)
+                latest, stored = latest_results(claim, corrections)
             except ValueError:
                 row["state"] = "invalid_versions"
                 continue
-            if latest.version > 1:
-                record = json.loads((Path(corrections) / f"{claim_id}.v{latest.version}.json")
-                                    .read_text(encoding="utf-8"))
-                version, input_hash, claim_results = latest.version, latest.input_hash, record["results"]
+            if stored is not None:
+                version, input_hash, claim_results = latest.version, latest.input_hash, stored
         route = route_claim(claim_results)
         state = outcome(route, events, input_hash, has_versions=version > 1, directory=directory)
         row.update(version=version, input_hash=input_hash, route=route["route"], state=state, ready=state == READY,

@@ -436,7 +436,7 @@ function eventSummary(e) {
     case "ingestion_error": return `${e.stage}: ${e.reason}`;
     case "injection_flag":
       return `${Core.plural(e.hits.length, "hit")}: ${Array.from(new Set(e.hits.map((x) => Core.FAMILY[x.family] || x.family))).join("; ")}`;
-    case "model_failure": return `${e.rule_id} · ${e.reason}${e.detail ? ": " + e.detail : ""}`;
+    case "model_failure": return `${e.rule_id} · ${Core.FAILURE[e.reason] || e.reason}${e.detail ? ": " + e.detail : ""}`;
     case "review_decision":
       return `${e.rule_id} · ${(Core.ACTION[e.action] || { label: e.action }).label} by ${e.actor}: ${e.reason}`;
     case "version_created":
@@ -448,15 +448,15 @@ function eventSummary(e) {
 // ------------------------------------------------------------ decisions
 // A decision made here is a draft in this browser until it is downloaded and
 // appended to the audit log. The latest one per finding (and per version of
-// the claim) replaces any earlier draft.
+// the claim: always its current version) replaces any earlier draft.
 function sameFinding(e, claimId, ruleId, inputHash) {
   return e.claim_id === claimId && e.rule_id === ruleId && e.input_hash === inputHash;
 }
 function draftFor(entry, ruleId) {
-  return State.drafts.find((d) => sameFinding(d, entry.route.claim_id, ruleId, entry.input_hash)) || null;
+  return State.drafts.find((d) => sameFinding(d, entry.route.claim_id, ruleId, Core.current(entry).input_hash)) || null;
 }
 function recordedFor(entry, ruleId) {
-  const mine = RECORDED.filter((e) => sameFinding(e, entry.route.claim_id, ruleId, entry.input_hash));
+  const mine = RECORDED.filter((e) => sameFinding(e, entry.route.claim_id, ruleId, Core.current(entry).input_hash));
   return mine.length ? mine[mine.length - 1] : null;
 }
 function saveDraft(event) {
@@ -464,7 +464,7 @@ function saveDraft(event) {
   State.save();
 }
 function discardDraft(entry, ruleId) {
-  State.drafts = State.drafts.filter((d) => !sameFinding(d, entry.route.claim_id, ruleId, entry.input_hash));
+  State.drafts = State.drafts.filter((d) => !sameFinding(d, entry.route.claim_id, ruleId, Core.current(entry).input_hash));
   State.save();
 }
 function downloadDecisions() {

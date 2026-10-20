@@ -1,0 +1,10 @@
+{
+  "version": "1.0.0",
+  "source": "Team proposal, to confirm with the mentor. The four groups are the challenge book's own words for what the engine must detect (Phase 1, Deterministic & AI Rule Engine): missing, inconsistent, duplicate or unsupported data. rules/rules.json is a checksummed pack file and carries no category, so the grouping lives here.",
+  "categories": {
+    "missing": ["R001", "R008", "R010"],
+    "inconsistent": ["R002", "R004", "R007", "R012", "R015"],
+    "duplicate": ["R006"],
+    "unsupported": ["R003", "R005", "R009", "R011", "R013", "R014"]
+  }
+}

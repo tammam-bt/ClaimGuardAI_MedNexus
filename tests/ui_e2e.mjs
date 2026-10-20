@@ -6,7 +6,7 @@
 // Prints one JSON object with what it observed; tests/test_ui_e2e.py checks
 // it. Nothing here asserts: the Python test does.
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -61,6 +61,7 @@ let nextId = 0;
 const pending = new Map();
 const errors = [];
 const network = [];
+const downloaded = [];  // guids of completed downloads
 ws.addEventListener("message", (ev) => {
   const msg = JSON.parse(ev.data);
   if (msg.id && pending.has(msg.id)) {
@@ -74,6 +75,10 @@ ws.addEventListener("message", (ev) => {
     if (!/^(file|data|blob|about):/.test(url)) network.push(url);
   } else if (msg.method === "Runtime.consoleAPICalled" && msg.params.type === "error") {
     errors.push(msg.params.args.map((a) => a.value ?? a.description).join(" "));
+  } else if (msg.method === "Log.entryAdded" && msg.params.entry.level === "error") {
+    errors.push(msg.params.entry.text);  // includes every Content-Security-Policy refusal
+  } else if (msg.method === "Browser.downloadProgress" && msg.params.state === "completed") {
+    downloaded.push(msg.params.guid);
   }
 });
 function send(method, params = {}, sessionId) {
@@ -139,6 +144,7 @@ try {
   await page("Runtime.enable");
   await page("Page.enable");
   await page("Network.enable");
+  await page("Log.enable");
 
   // ---- every page draws
   await open(pagePath, "#/dashboard");
@@ -246,6 +252,16 @@ try {
   // Replacing a decision keeps one draft per finding.
   await decide("R004", "Request information", "Need the member card.");
   out.afterReplace = { head: await text(".claim-head__title"), drafts: await evaluate(`JSON.parse(localStorage.getItem('claimguard.drafts.' + JSON.parse(document.getElementById('claimguard-data').textContent).run.run_id)).length`) };
+
+  // ---- the decisions download is a real file, under the page's Content-Security-Policy
+  const downloadDir = join(profile, "downloads");
+  await send("Browser.setDownloadBehavior", { behavior: "allowAndName", downloadPath: downloadDir, eventsEnabled: true });
+  await evaluate("[...document.querySelectorAll('button')].find(b => b.textContent.startsWith('Download decisions')).click()");
+  for (let waited = 0; !downloaded.length && waited < 10000; waited += 100) await sleep(100);
+  out.download = downloaded.length
+    ? { completed: true, lines: readFileSync(join(downloadDir, downloaded[0]), "utf-8").split(/\r?\n/)
+      .filter(Boolean).map((l) => JSON.parse(l)) }
+    : { completed: false };
 
   // ---- settings: the name is the same everywhere; drafts can be discarded
   await goTo("#/settings");

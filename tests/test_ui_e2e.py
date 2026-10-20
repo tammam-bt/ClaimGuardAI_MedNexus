@@ -205,6 +205,18 @@ class EndToEndTests(unittest.TestCase):
             self.assertEqual((d["event"], d["claim_id"], d["actor"]), ("review_decision", "CG-785C09BD9CC8", "Reviewer 01"))
             self.assertEqual(d["original_status"], "FAIL")
 
+    def test_the_decisions_download_works_under_the_csp(self):
+        # The page's Content-Security-Policy blocks every load and request;
+        # the download is a navigation to a blob: URL and must still work.
+        download = self.out["download"]
+        self.assertTrue(download["completed"], "the browser did not complete the download")
+        required = {"event", "claim_id", "rule_id", "action", "actor", "reason", "created_at", "original_status", "input_hash"}
+        self.assertEqual(len(download["lines"]), 2)  # R003 dismissed, R004 replaced by a request for information
+        for event in download["lines"]:
+            self.assertEqual(set(event), required)
+        self.assertEqual(sorted((e["rule_id"], e["action"]) for e in download["lines"]),
+                         [("R003", "dismiss_with_reason"), ("R004", "request_information")])
+
     def test_flagged_claim(self):
         self.assertIn("Flagged by the injection pre-filter", self.out["flagged"]["callout"])
         self.assertIn("Withheld from the model", self.out["flagged"]["explanation"])

@@ -154,3 +154,23 @@ def read_jsonl(path):
         result.records += 1
         result.accepted.append(Ingested(claim, provenance, raw))
     return result
+
+
+def claims_by_id(path):
+    """{claim_id: record} for each line of a claims file that parses as a JSON
+    object with a string claim_id, in file order, the first occurrence kept.
+
+    This is every claim the scorer (src/evaluate.py) and the review tools can
+    name. Unlike the pack's load_jsonl, a line nothing can use is skipped
+    instead of stopping the reader, so one malformed held-out record cannot
+    take the review tools down with it. Whether a claim is valid is still
+    decided by read_jsonl and the contract, never here."""
+    claims = {}
+    for raw in Path(path).read_bytes().splitlines():
+        try:
+            record = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, RecursionError):
+            continue
+        if isinstance(record, dict) and isinstance(record.get("claim_id"), str):
+            claims.setdefault(record["claim_id"], record)
+    return claims

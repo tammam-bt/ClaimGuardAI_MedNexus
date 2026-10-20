@@ -17,12 +17,27 @@ Each call ends in exactly one of these:
                         needs_human_review
   status_contradiction  the text presents a FAIL or UNABLE_TO_ASSESS finding
                         as passed or approved
+  clinical_advice       the text gives clinical advice or judgment: prescribing,
+                        a dose, administering a drug, surgery, stopping a
+                        medication, or medical necessity (doc 05: the model
+                        must not "infer clinical necessity")
   unknown_rule          the text names a rule ID other than the finding's
 
 The model's output has no status field, so it cannot change a status. Its
-text is the only place it could contradict the rule, which is what the last
-two checks look at. They are heuristics: they catch the plain forms, not
-every paraphrase.
+text is the only place it could contradict the rule or step outside billing,
+which is what the last three checks look at. They are heuristics: they catch
+the plain forms, not every paraphrase. The clinical check runs on the text
+normalized as the injection pre-filter does (NFKC, zero-width characters and
+lookalikes), so a zero-width space inside "prescribe" or full-width letters
+do not slip past.
+
+The clinical check leaves out words the rules and reference data use for
+billing: diagnosis, procedure, therapy (SVC-THERAPY), clinic, clinical,
+unit and quantity. "units" counts only with a schedule or a drug ("units
+daily", "units of insulin"), since "billed 5 units, maximum 2" is a correct
+R013 explanation. It is not negation-aware: "this check does not assess
+medical necessity" also falls back. That is deliberate; a fallback only
+costs wording, never a finding.
 
 On anything but ok, the explanation is the rule engine's own, with every
 evidence path cited, and a model_failure event records why. Neither the
@@ -34,6 +49,7 @@ import threading
 import time
 
 from claimguard._pack import validate_explanation
+from claimguard.guards.injection import _normalize
 from .minimize import minimize
 
 _APPROVAL = re.compile(
@@ -44,6 +60,19 @@ _APPROVAL = re.compile(
     r"all (?:checks|rules) (?:passed|pass)|(?:check|rule) passed|passes (?:the|this|all)|"
     r"no (?:issues?|problems?) (?:found|detected)|nothing to (?:fix|correct|review))\b",
     re.IGNORECASE,
+)
+_DRUG = r"(?:drugs?|medications?|medicines?|insulin|injections?|antibiotics?|treatment)"
+# Matched against _normalize(text), which is casefolded: "µg" arrives as "μg".
+_CLINICAL = re.compile(
+    r"\b(?:prescrib(?:e|es|ed|ing)|dos(?:e|es|age|ages|ing)|"
+    r"administer(?:s|ed|ing)? (?:(?:the|a|an|this) )?(?:\d+|" + _DRUG + r")|"
+    r"surgery|surgeries|surgical|"
+    r"(?:medically|clinically) (?:necessary|unnecessary|indicated|appropriate|justified)|"
+    r"medical necessity|"
+    r"stop taking|(?:stop using|discontinue) (?:(?:the|this|your|their) )?" + _DRUG + r"|"
+    r"(?:patient|member) (?:should|must|needs to) (?:take|undergo)|"
+    r"\d+(?:[.,]\d+)? ?(?:mg|mcg|μg|ml|iu)|"
+    r"units? (?:daily|per day|a day|twice|once|every|of " + _DRUG + r"))\b"
 )
 _RULE_ID = re.compile(r"\bR\d{3}\b")
 
@@ -89,6 +118,8 @@ def _checked(output, finding):
     text = output["explanation"]
     if finding["status"] in ("FAIL", "UNABLE_TO_ASSESS") and _APPROVAL.search(text):
         raise _Failure("status_contradiction", f"text presents a {finding['status']} finding as passed")
+    if _CLINICAL.search(_normalize(text)):
+        raise _Failure("clinical_advice", "text gives clinical advice")
     if set(_RULE_ID.findall(text)) - {finding["rule_id"]}:
         raise _Failure("unknown_rule", "text names another rule ID")
     return output

@@ -15,8 +15,13 @@ Two roles:
 
 The role never goes into a review event or a result row: both schemas forbid
 extra keys, and evaluate.py rejects a result with one. It is looked up in a
-separate directory, {actor: role}, kept beside the audit log.
+separate directory, {actor: role}, kept beside the audit log
+(actors.example.json shows the format). Every command that writes a human
+action to the audit log requires it: no directory, no action.
 """
+import json
+from pathlib import Path
+
 REVIEW_ACTIONS = frozenset({"confirm_issue", "dismiss_with_reason", "request_information",
                             "mark_corrected_for_recheck"})
 
@@ -33,6 +38,25 @@ _EVENT_KEYS = {"claim_id", "rule_id", "action", "actor", "reason", "created_at",
 class PermissionDenied(Exception):
     """An action refused. The message names the role and action, never the
     reason text or other input."""
+
+
+def load_directory(path):
+    """The actor directory {actor: role} from a JSON file. Raises ValueError,
+    naming the file but never quoting its content, unless it is one non-empty
+    JSON object mapping non-blank names to known roles: a mistyped role must
+    never grant a permission or silently drop one."""
+    try:
+        directory = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise ValueError(f"actor directory {path}: not a readable JSON file ({type(e).__name__})") from None
+    if not isinstance(directory, dict) or not directory:
+        raise ValueError(f"actor directory {path}: expected a non-empty JSON object of actor names to roles")
+    for actor, role in directory.items():
+        if not actor.strip():
+            raise ValueError(f"actor directory {path}: an actor name is blank")
+        if not isinstance(role, str) or role not in PERMISSIONS:
+            raise ValueError(f"actor directory {path}: an actor has an unknown role; roles are {sorted(PERMISSIONS)}")
+    return directory
 
 
 def allowed(role, action):

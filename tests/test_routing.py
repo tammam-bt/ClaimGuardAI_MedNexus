@@ -5,7 +5,7 @@ from pathlib import Path
 
 from claimguard._pack import config, load_jsonl
 from claimguard.review.routing import (
-    CLEAR, ESCALATE, REVIEW, ROUTING_POLICY_VERSION, outstanding, route_claim, route_run,
+    CLEAR, ESCALATE, REVIEW, ROUTING_POLICY_VERSION, TRIGGERS, outstanding, route_claim, route_run,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,8 +56,9 @@ class RoutingTests(ResultsBuilder):
         row = route_claim(list(reversed(results)))
         self.assertEqual(row["route"], ESCALATE)
         self.assertEqual(row["reasons"], [
-            {"rule_id": "R003", "status": "UNABLE_TO_ASSESS", "severity": "high"},
-            {"rule_id": "R013", "status": "FAIL", "severity": "medium"},
+            {"rule_id": "R003", "status": "UNABLE_TO_ASSESS", "severity": "high",
+             "triggers": ["low_confidence", "high_severity"]},
+            {"rule_id": "R013", "status": "FAIL", "severity": "medium", "triggers": ["issue"]},
         ])
 
     def test_incomplete_or_mixed_results_are_rejected_not_cleared(self):
@@ -92,6 +93,33 @@ class RoutingTests(ResultsBuilder):
         self.assertEqual({r["route"] for r in rows}, {ESCALATE})
 
 
+class TriggerTests(ResultsBuilder):
+    """D6: each reason names why it needs a human, in the challenge book's words:
+    "flags low-confidence or high-severity cases for explicit human approval"."""
+
+    def triggers(self, **statuses):
+        [reason] = route_claim(self.results(**statuses))["reasons"]
+        return reason["triggers"]
+
+    def test_each_kind_of_finding(self):
+        self.assertEqual(self.triggers(R007="FAIL"), ["high_severity", "issue"])
+        self.assertEqual(self.triggers(R013="FAIL"), ["issue"])
+        self.assertEqual(self.triggers(R003="UNABLE_TO_ASSESS"), ["low_confidence", "high_severity"])
+        self.assertEqual(self.triggers(R010="UNABLE_TO_ASSESS"), ["low_confidence"])
+        self.assertEqual(self.triggers(R014="NOT_IMPLEMENTED"), ["low_confidence"])
+
+    def test_every_flagged_finding_has_a_trigger_on_all_public_gold(self):
+        for split in ("development", "validation", "stress"):
+            for row in route_run(load_jsonl(ROOT / "data" / split / "expected_results.jsonl")):
+                for reason in row["reasons"]:
+                    self.assertTrue(set(reason["triggers"]) <= set(TRIGGERS) and reason["triggers"], reason)
+
+    def test_triggers_never_change_the_route(self):
+        # The route table is DEC-004's; triggers explain it, they do not decide it.
+        self.assertEqual(route_claim(self.results(R013="FAIL"))["route"], REVIEW)
+        self.assertEqual(route_claim(self.results(R003="UNABLE_TO_ASSESS"))["route"], ESCALATE)
+
+
 class ApprovalGateTests(ResultsBuilder):
     def event(self, rule_id, action="dismiss_with_reason", original_status="FAIL", **kw):
         """A review event shaped like schemas/review_event.schema.json."""
@@ -107,7 +135,8 @@ class ApprovalGateTests(ResultsBuilder):
 
     def test_flagged_without_decision_is_outstanding(self):
         self.assertEqual(self.pending([], R007="FAIL"), [
-            {"rule_id": "R007", "status": "FAIL", "severity": "high", "why": "no review decision recorded"},
+            {"rule_id": "R007", "status": "FAIL", "severity": "high", "triggers": ["high_severity", "issue"],
+             "why": "no review decision recorded"},
         ])
 
     def test_named_dismissal_with_reason_approves(self):
@@ -143,6 +172,30 @@ class ApprovalGateTests(ResultsBuilder):
     def test_not_implemented_cannot_be_dismissed(self):
         pending = self.pending([self.event("R014", original_status="NOT_IMPLEMENTED")], R014="NOT_IMPLEMENTED")
         self.assertEqual(pending[0]["why"], "check not implemented; cannot be dismissed")
+
+    def test_a_decision_on_another_version_does_not_count(self):
+        # D1: a dismissal recorded on version 1 must not approve version 2.
+        v1 = self.event("R007", input_hash="a" * 64)
+        route = route_claim(self.results(R007="FAIL"))
+        self.assertEqual(outstanding(route, [v1], input_hash="a" * 64), [])
+        self.assertEqual(outstanding(route, [v1], input_hash="b" * 64)[0]["why"], "no review decision recorded")
+        no_hash = self.event("R007")
+        self.assertEqual(len(outstanding(route, [no_hash], input_hash="a" * 64)), 1)
+
+    def test_only_an_actor_the_directory_allows_approves(self):
+        route = route_claim(self.results(R007="FAIL"))
+        dismissal = self.event("R007")  # actor "reviewer-1"
+        self.assertEqual(outstanding(route, [dismissal], directory={"reviewer-1": "reviewer"}), [])
+        self.assertEqual(outstanding(route, [dismissal], directory={"reviewer-1": "admin"}), [])
+        for directory in ({}, {"someone-else": "reviewer"}, {"reviewer-1": "superuser"}):
+            with self.subTest(directory=directory):
+                self.assertEqual(len(outstanding(route, [dismissal], directory=directory)), 1)
+
+    def test_an_unauthorized_later_decision_does_not_hide_an_earlier_one(self):
+        # A stranger's later "confirm" must not replace a reviewer's dismissal.
+        route = route_claim(self.results(R007="FAIL"))
+        events = [self.event("R007"), self.event("R007", "confirm_issue", actor="stranger")]
+        self.assertEqual(outstanding(route, events, directory={"reviewer-1": "reviewer"}), [])
 
     def test_approval_never_changes_the_findings(self):
         results = self.results(R007="FAIL")

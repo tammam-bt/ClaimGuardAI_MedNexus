@@ -28,6 +28,7 @@ FIX = [{"op": "replace", "path": "/lines/0/authorization_id", "value": "AUTH-CG-
            "authorization_id": "AUTH-CG-B39790AC3604-1", "patient_id": "PAT-64397DF099", "service_code": "SVC-IMAGE",
            "status": "approved", "valid_from": "2026-03-01", "valid_to": "2026-04-30", "max_quantity": 5}}]
 NOTE = [{"op": "replace", "path": "/notes", "value": "Called the provider."}]
+DIRECTORY = {"Reviewer 01": "reviewer"}
 
 
 class RunCase(unittest.TestCase):
@@ -65,7 +66,13 @@ class RunCase(unittest.TestCase):
         path.write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
         return path
 
+    def directory_file(self, directory=DIRECTORY):
+        path = self.dir / "actors.json"
+        path.write_text(json.dumps(directory), encoding="utf-8")
+        return path
+
     def append(self, events, **kw):
+        kw.setdefault("directory", DIRECTORY)
         return append_decisions(self.write(events), self.log, claims_path=DEV / "claims.jsonl",
                                 results_path=self.results, **kw)
 
@@ -104,6 +111,24 @@ class DecisionTests(RunCase):
             self.append([self.decision()], directory={"Someone else": "reviewer"})
         self.assertEqual(self.append([self.decision()], directory={"Reviewer 01": "admin"})["appended"], 1)
 
+    def test_the_command_requires_a_directory(self):
+        # Without one, every self-declared name used to count as a reviewer.
+        before = self.log.read_bytes()
+        path = self.write([self.decision()])
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            decisions_main(["--decisions", str(path), "--log", str(self.log),
+                            "--claims", str(DEV / "claims.jsonl"), "--results", str(self.results)])
+        self.assertEqual(self.log.read_bytes(), before)
+
+    def test_the_command_reads_the_directory_file(self):
+        path = self.write([self.decision()])
+        args = ["--decisions", str(path), "--log", str(self.log), "--claims", str(DEV / "claims.jsonl"),
+                "--results", str(self.results), "--directory"]
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(decisions_main(args + [str(self.directory_file({"Someone else": "reviewer"}))]), 1)
+            self.assertEqual(decisions_main(args + [str(self.directory_file({"Reviewer 01": "superuser"}))]), 1)
+            self.assertEqual(decisions_main(args + [str(self.directory_file())]), 0)
+
     def test_the_command_needs_the_runs_files(self):
         # Without the claims and results, a decision on another version of
         # the claim or on a stale status could not be caught, so the command
@@ -122,7 +147,7 @@ class DecisionTests(RunCase):
 
 class CorrectionTests(RunCase):
     def test_correction_rechecks_and_records_a_version(self):
-        out, record = correct_claim(DEV / "claims.jsonl", AUTH_CLAIM, FIX, actor="Reviewer 01",
+        out, record = correct_claim(DEV / "claims.jsonl", AUTH_CLAIM, FIX, actor="Reviewer 01", directory=DIRECTORY,
                                     reason="Authorization added.", output=self.dir / "corrections", log=self.log)
         self.assertEqual(record["version"], 2)
         self.assertEqual(record["status_changes"], [{"rule_id": "R008", "before": "FAIL", "after": "PASS"},
@@ -144,6 +169,7 @@ class CorrectionTests(RunCase):
             with contextlib.redirect_stdout(io.StringIO()) as printed:
                 code = correct_main(["--claims", str(DEV / "claims.jsonl"), "--claim-id", AUTH_CLAIM,
                                      "--changes", str(changes), "--actor", "Reviewer 01", "--reason", "Authorization added.",
+                                     "--directory", str(self.directory_file()),
                                      "--output", str(self.dir / "corrections")])
         finally:
             REGISTRY["R009"] = saved
@@ -156,16 +182,38 @@ class CorrectionTests(RunCase):
         before = self.log.read_bytes()
         for changes in ([], [{"op": "replace", "path": "/claim_id", "value": "CG-X"}]):
             with self.assertRaises(ValueError):
-                correct_claim(DEV / "claims.jsonl", AUTH_CLAIM, changes, actor="Reviewer 01", reason="r",
+                correct_claim(DEV / "claims.jsonl", AUTH_CLAIM, changes, actor="Reviewer 01", directory=DIRECTORY, reason="r",
                               output=self.dir / "corrections", log=self.log)
         self.assertEqual(self.log.read_bytes(), before)
         self.assertFalse((self.dir / "corrections").exists())
 
+    def test_an_actor_outside_the_directory_cannot_correct(self):
+        before = self.log.read_bytes()
+        for actor in ("Stranger", "Reviewer 01 "):
+            with self.subTest(actor=actor), self.assertRaises(ValueError):
+                correct_claim(DEV / "claims.jsonl", AUTH_CLAIM, FIX, actor=actor, directory=DIRECTORY,
+                              reason="Authorization added.", output=self.dir / "corrections", log=self.log)
+        self.assertEqual(self.log.read_bytes(), before)
+        self.assertFalse((self.dir / "corrections").exists())
+
+    def test_the_correction_command_requires_a_directory(self):
+        changes = self.dir / "fix.json"
+        changes.write_text(json.dumps(FIX), encoding="utf-8")
+        args = ["--claims", str(DEV / "claims.jsonl"), "--claim-id", AUTH_CLAIM, "--changes", str(changes),
+                "--actor", "Stranger", "--reason", "r", "--output", str(self.dir / "corrections"), "--log", str(self.log)]
+        before = self.log.read_bytes()
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            correct_main(args)
+        with contextlib.redirect_stdout(io.StringIO()) as printed:
+            self.assertEqual(correct_main(args + ["--directory", str(self.directory_file())]), 1)
+        self.assertIn("not in the directory", printed.getvalue())
+        self.assertEqual(self.log.read_bytes(), before)
+
     def test_a_second_correction_makes_version_3(self):
         corrections = self.dir / "corrections"
-        _, v2 = correct_claim(DEV / "claims.jsonl", AUTH_CLAIM, FIX, actor="Reviewer 01", reason="Authorization added.",
+        _, v2 = correct_claim(DEV / "claims.jsonl", AUTH_CLAIM, FIX, actor="Reviewer 01", directory=DIRECTORY, reason="Authorization added.",
                               output=corrections, log=self.log)
-        _, v3 = correct_claim(DEV / "claims.jsonl", AUTH_CLAIM, NOTE, actor="Reviewer 01", reason="Note from the provider.",
+        _, v3 = correct_claim(DEV / "claims.jsonl", AUTH_CLAIM, NOTE, actor="Reviewer 01", directory=DIRECTORY, reason="Note from the provider.",
                               output=corrections, log=self.log)
         self.assertEqual((v3["version"], v3["parent_hash"]), (3, v2["input_hash"]))
         self.assertEqual(v3["claim"]["lines"][0]["authorization_id"], "AUTH-CG-B39790AC3604-1")  # v2's change kept
@@ -177,14 +225,14 @@ class CorrectionTests(RunCase):
 
     def test_a_version_file_that_does_not_follow_from_its_parent_is_refused(self):
         corrections = self.dir / "corrections"
-        out, _ = correct_claim(DEV / "claims.jsonl", AUTH_CLAIM, FIX, actor="Reviewer 01", reason="Authorization added.",
+        out, _ = correct_claim(DEV / "claims.jsonl", AUTH_CLAIM, FIX, actor="Reviewer 01", directory=DIRECTORY, reason="Authorization added.",
                                output=corrections, log=self.log)
         record = json.loads(out.read_text(encoding="utf-8"))
         record["claim"]["total_amount"] = 1  # edited by hand after it was recorded
         out.write_text(json.dumps(record), encoding="utf-8")
         before = self.log.read_bytes()
         with self.assertRaises(ValueError):
-            correct_claim(DEV / "claims.jsonl", AUTH_CLAIM, NOTE, actor="Reviewer 01", reason="r",
+            correct_claim(DEV / "claims.jsonl", AUTH_CLAIM, NOTE, actor="Reviewer 01", directory=DIRECTORY, reason="r",
                           output=corrections, log=self.log)
         self.assertEqual(self.log.read_bytes(), before)
         self.assertFalse((corrections / f"{AUTH_CLAIM}.v3.json").exists())
@@ -192,7 +240,7 @@ class CorrectionTests(RunCase):
     def test_the_interface_shows_every_version(self):
         corrections = self.dir / "corrections"
         for changes in (FIX, NOTE):
-            correct_claim(DEV / "claims.jsonl", AUTH_CLAIM, changes, actor="Reviewer 01", reason="r",
+            correct_claim(DEV / "claims.jsonl", AUTH_CLAIM, changes, actor="Reviewer 01", directory=DIRECTORY, reason="r",
                           output=corrections, log=self.log)
         data = build(self.results, DEV / "claims.jsonl", audit_log=self.log, corrections=corrections)
         entry = next(c for c in data["claims"] if c["claim"]["claim_id"] == AUTH_CLAIM)
@@ -201,7 +249,7 @@ class CorrectionTests(RunCase):
 
     def test_the_interface_shows_the_version(self):
         corrections = self.dir / "corrections"
-        correct_claim(DEV / "claims.jsonl", AUTH_CLAIM, FIX, actor="Reviewer 01", reason="Authorization added.",
+        correct_claim(DEV / "claims.jsonl", AUTH_CLAIM, FIX, actor="Reviewer 01", directory=DIRECTORY, reason="Authorization added.",
                       output=corrections, log=self.log)
         (corrections / "stale.v2.json").write_text(json.dumps({"claim_id": CLAIM, "parent_hash": "0" * 64}), encoding="utf-8")
         data = build(self.results, DEV / "claims.jsonl", audit_log=self.log, corrections=corrections)

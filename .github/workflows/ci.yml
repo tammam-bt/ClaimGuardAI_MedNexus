@@ -40,22 +40,31 @@ jobs:
             exit 1
           fi
 
-      - name: Evaluate our engine on development claims
+      - name: Evaluate our engine on every public split
         run: |
-          python -m claimguard.run --strict --input data/development/claims.jsonl --output outputs/dev_predictions.jsonl
-          python src/evaluate.py --gold data/development/expected_results.jsonl \
-            --pred outputs/dev_predictions.jsonl --claims data/development/claims.jsonl \
-            --output outputs/dev_metrics.json
+          for split in development validation stress; do
+            python -m claimguard.run --strict --input data/$split/claims.jsonl --output outputs/${split}_predictions.jsonl
+            python src/evaluate.py --gold data/$split/expected_results.jsonl \
+              --pred outputs/${split}_predictions.jsonl --claims data/$split/claims.jsonl \
+              --output outputs/${split}_metrics.json
+            python -m claimguard.evaluation.summary --split $split --gold data/$split/expected_results.jsonl \
+              --pred outputs/${split}_predictions.jsonl --claims data/$split/claims.jsonl \
+              --manifest outputs/${split}_predictions.jsonl.manifest.json --output outputs/${split}_summary.json
+          done
           python - <<'PY'
           import json, sys
-          m = json.load(open("outputs/dev_metrics.json"))["overall"]
-          print(f"status_accuracy={m['status_accuracy']} not_implemented={m['not_implemented']} fp={m['fp']} fn={m['fn']}")
-          sys.exit(0 if m["status_accuracy"] == 1.0 and m["not_implemented"] == 0 else 1)
+          ok = True
+          for split in ("development", "validation", "stress"):
+              m = json.load(open(f"outputs/{split}_metrics.json"))["overall"]
+              print(f"{split}: status_accuracy={m['status_accuracy']} not_implemented={m['not_implemented']} fp={m['fp']} fn={m['fn']}")
+              ok = ok and m["status_accuracy"] == 1.0 and m["not_implemented"] == 0
+          sys.exit(0 if ok else 1)
           PY
 
       - uses: actions/upload-artifact@v4
         with:
-          name: dev-metrics-py${{ matrix.python }}
+          name: metrics-py${{ matrix.python }}
           path: |
-            outputs/dev_metrics.json
-            outputs/dev_predictions.jsonl.manifest.json
+            outputs/*_metrics.json
+            outputs/*_summary.json
+            outputs/*_predictions.jsonl.manifest.json

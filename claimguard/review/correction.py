@@ -78,6 +78,18 @@ def original(claim: Mapping[str, Any]) -> ClaimVersion:
     return _version(claim, 1, None, None, None, ())
 
 
+def version_hash(claim: Mapping[str, Any]) -> Optional[str]:
+    """The claim's version-1 input_hash, or None when ingestion would reject
+    the claim: it was never checked, so it has no version to decide on, and
+    validate_transport could raise on it, even TypeError (DEC-013)."""
+    from claimguard.ingest import ContractError, check_claim  # here: ingestion never imports review
+    try:
+        check_claim(claim)
+    except ContractError:
+        return None
+    return original(claim).input_hash
+
+
 def _locate(doc: Any, path: str) -> Tuple[Any, str]:
     """(container, last token) for a strict RFC 6901 pointer. Raises ValueError."""
     if not isinstance(path, str) or not path.startswith("/"):

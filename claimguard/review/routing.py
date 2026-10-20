@@ -11,6 +11,12 @@ UNABLE_TO_ASSESS. An LLM score is uncalibrated and is never read.
     REVIEW    only medium- or low-severity FAIL / UNABLE_TO_ASSESS
     CLEAR     every result PASS or NOT_APPLICABLE ("pre-check clean", not approval)
 
+Each reason names its triggers, in the challenge book's words ("flags
+low-confidence or high-severity cases for explicit human approval"):
+low_confidence (the engine abstained or the check never ran), high_severity
+(the rule's severity), issue (a proven FAIL). They explain the route; the
+table above alone decides it.
+
 Routing is its own output, one row per claim. It is never a field on a result
 row: evaluate.py rejects any key beyond schemas/result.schema.json. Approval is
 read from review events (schemas/review_event.schema.json) and never changes a
@@ -22,12 +28,15 @@ import argparse
 import json
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from claimguard._pack import STATUSES, load_jsonl
+from claimguard.guards.rbac import PermissionDenied, authorize
 
-ROUTING_POLICY_VERSION = "1.0.0"
-"""Bump when the table above changes, and record it in the audit trail."""
+ROUTING_POLICY_VERSION = "1.1.0"
+"""Bump when the table above or the routing row changes, and record it in the
+audit trail. 1.1.0: reasons carry triggers; the table is unchanged."""
+TRIGGERS = ("low_confidence", "high_severity", "issue")
 
 ESCALATE, REVIEW, CLEAR = "ESCALATE", "REVIEW", "CLEAR"
 FLAGGED = ("FAIL", "UNABLE_TO_ASSESS", "NOT_IMPLEMENTED")
@@ -64,9 +73,18 @@ def route_claim(results: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     return {
         "claim_id": claim_id,
         "route": route,
-        "reasons": [{"rule_id": r["rule_id"], "status": r["status"], "severity": r["severity"]} for r in flagged],
+        "reasons": [{"rule_id": r["rule_id"], "status": r["status"], "severity": r["severity"],
+                     "triggers": _triggers(r)} for r in flagged],
         "routing_policy_version": ROUTING_POLICY_VERSION,
     }
+
+
+def _triggers(result: Mapping[str, Any]) -> List[str]:
+    """Why one flagged result needs a human, in TRIGGERS order."""
+    found = {"low_confidence": result["status"] in ("UNABLE_TO_ASSESS", "NOT_IMPLEMENTED"),
+             "high_severity": result["severity"] == "high",
+             "issue": result["status"] == "FAIL"}
+    return [t for t in TRIGGERS if found[t]]
 
 
 def route_run(results: Iterable[Mapping[str, Any]]) -> List[Dict[str, Any]]:
@@ -77,7 +95,9 @@ def route_run(results: Iterable[Mapping[str, Any]]) -> List[Dict[str, Any]]:
     return [route_claim(rows) for rows in by_claim.values()]
 
 
-def outstanding(routing: Mapping[str, Any], events: Iterable[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+def outstanding(routing: Mapping[str, Any], events: Iterable[Mapping[str, Any]], *,
+                input_hash: Optional[str] = None,
+                directory: Optional[Mapping[str, str]] = None) -> List[Dict[str, Any]]:
     """Flagged findings still lacking explicit approval. Empty means approved.
 
     events must be in recorded order (e.g. read from the audit log). Per
@@ -85,6 +105,13 @@ def outstanding(routing: Mapping[str, Any], events: Iterable[Mapping[str, Any]])
     rule, carry a non-blank actor and reason, and whose original_status equals
     the finding's current status (a decision on an earlier result is stale).
     Anything else does not count, so a malformed event can never approve.
+
+    With input_hash, only decisions taken on that version of the claim count:
+    a dismissal on version 1 never approves version 2. With directory
+    ({actor: role}), only decisions by an actor whose role may take that
+    action count, so an unknown actor can neither approve nor, by deciding
+    later, hide a valid decision. Both default to off, matching the page's
+    Core.outstanding, which receives events already filtered by version.
     """
     latest: Dict[Tuple[Any, Any], Any] = {}
     for e in events:
@@ -92,6 +119,13 @@ def outstanding(routing: Mapping[str, Any], events: Iterable[Mapping[str, Any]])
             continue
         if not str(e.get("actor") or "").strip() or not str(e.get("reason") or "").strip():
             continue
+        if input_hash is not None and e.get("input_hash") != input_hash:
+            continue
+        if directory is not None:
+            try:
+                authorize(directory, e.get("actor"), e.get("action"))
+            except PermissionDenied:
+                continue
         latest[(e.get("rule_id"), e.get("original_status"))] = e.get("action")
 
     pending = []

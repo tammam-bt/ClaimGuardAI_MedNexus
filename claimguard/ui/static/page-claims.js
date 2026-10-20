@@ -22,7 +22,7 @@ const ClaimViews = (function () {
       || String(a.claim.submission_date).localeCompare(String(b.claim.submission_date));
   }
   function decidedOf(entry, events) {
-    return [Object.keys(Core.latestDecisions(entry, events)).length, entry.route.reasons.length];
+    return [Object.keys(Core.latestDecisions(entry, events)).length, Core.current(entry).route.reasons.length];
   }
 
   function matches(entry, f, events) {
@@ -133,7 +133,8 @@ const ClaimDetail = (function () {
   }
   function explanationLabel(x) {
     const s = Core.SOURCE[x.kind] || Core.SOURCE.mock;
-    const why = x.kind === "fallback" && x.record && x.record.failure ? `The AI answer was rejected (${x.record.failure.reason}).`
+    const why = x.kind === "fallback" && x.record && x.record.failure
+      ? `The AI answer was rejected: ${(Core.FAILURE[x.record.failure.reason] || x.record.failure.reason).toLowerCase()}.`
       : x.kind === "skipped_flagged" ? "This claim was flagged for injection, so its findings were never sent to the model." : null;
     return badge(s.label, { tone: s.tone, icon: s.icon, title: why });
   }
@@ -226,6 +227,9 @@ const ClaimDetail = (function () {
     return box;
   }
 
+  // Why a finding needs a human (routing triggers), in the challenge's words.
+  const TRIGGER_LABEL = { low_confidence: "low confidence", high_severity: "high severity", issue: "proven issue" };
+
   function routeCallout(entry) {
     const route = entry.route;
     if (!route.reasons.length) {
@@ -238,7 +242,8 @@ const ClaimDetail = (function () {
       body: h("div", { class: "row", style: { marginTop: "8px" } }, route.reasons.map((x) =>
         h("a", { href: `#finding-${x.rule_id}`, class: "badge tone-neutral", style: { textDecoration: "none" },
           onClick: (ev) => { ev.preventDefault(); scrollToId(`finding-${x.rule_id}`); } },
-        `${x.rule_id} · ${Core.STATUS[x.status].label} · ${x.severity}`))) });
+        `${x.rule_id} · ${Core.STATUS[x.status].label} · ` +
+        ((x.triggers || []).map((t) => TRIGGER_LABEL[t] || t).join(", ") || x.severity)))) });
   }
 
   function flagCallout(entry) {
@@ -367,9 +372,10 @@ const ClaimDetail = (function () {
 
   function progressCard(entry) {
     const events = decisions();
-    const total = entry.route.reasons.length;
+    const cur = Core.current(entry);
+    const total = cur.route.reasons.length;
     const decided = Object.keys(Core.latestDecisions(entry, events)).length;
-    const mine = State.drafts.filter((d) => d.claim_id === entry.route.claim_id && d.input_hash === entry.input_hash).length;
+    const mine = State.drafts.filter((d) => d.claim_id === cur.route.claim_id && d.input_hash === cur.input_hash).length;
     return card({ title: "Review progress", body: h("div", { class: "stack" },
       h("div", { class: "row" }, outcomeBadge(Core.outcome(entry, events))),
       total ? bars([{ label: "Findings decided", value: decided, total, tone: "primary", display: `${decided} / ${total}` }])
@@ -396,7 +402,11 @@ const ClaimDetail = (function () {
       return card({ body: emptyState({ icon: "search", title: `No claim ${id} in this run`,
         text: "It may have been rejected at ingestion, or belong to another run.", action: linkButton({ href: href("claims"), label: "All claims", icon: "chevron-left" }) }) });
     }
-    const c = entry.claim;
+    // Everything a reviewer decides on is the current version: the newest
+    // corrected one, else the claim as received (Core.current).
+    const cur = Core.current(entry);
+    const c = cur.claim;
+    const onVersion = cur.version > 1 ? ` on v${cur.version}` : "";
     const [prev, next] = ClaimViews.neighbours(id);
     const headBadges = h("span", { class: "row" });
     const lifecycleHolder = h("div");
@@ -405,7 +415,8 @@ const ClaimDetail = (function () {
 
     function refresh() {
       const events = decisions();
-      fill(headBadges, routeBadge(entry.route.route), outcomeBadge(Core.outcome(entry, events)),
+      fill(headBadges, cur.version > 1 ? badge(`v${cur.version}`, { tone: "info", icon: "refresh" }) : null,
+        routeBadge(cur.route.route), outcomeBadge(Core.outcome(entry, events)),
         entry.flag ? badge("Flagged for injection", { tone: "unknown", icon: "shield-alert" }) : null);
       fill(lifecycleHolder, lifecycleStrip(Core.lifecycle(entry, events), {
         label: `Life cycle of ${id}`,
@@ -418,7 +429,7 @@ const ClaimDetail = (function () {
     }
     refresh();
 
-    const counts = Core.statusCounts(entry.results);
+    const counts = Core.statusCounts(cur.results);
     const finds = Core.findings(entry);
 
     return h("div", { class: "stack" },
@@ -438,23 +449,26 @@ const ClaimDetail = (function () {
       entry.flag ? section("sec-flag", flagCallout(entry)) : null,
       h("div", { class: "grid grid--main-side" },
         h("div", { class: "stack" },
-          section("sec-route", routeCallout(entry)),
-          section("sec-checks", card({ title: "All 15 checks",
+          cur.version > 1 ? callout({ tone: "info", icon: "refresh", title: `Deciding on version ${cur.version}`,
+            text: `This claim was corrected and rechecked. Its findings, checks and data below are those of v${cur.version}; ` +
+              "decisions on an earlier version no longer count. The claim as received (v1) is kept unchanged below." }) : null,
+          section("sec-route", routeCallout(cur)),
+          section("sec-checks", card({ title: `All 15 checks${onVersion}`,
             meta: `${counts.PASS} passed · ${counts.FAIL} failed · ${counts.UNABLE_TO_ASSESS} unable · ${counts.NOT_APPLICABLE} n/a` +
               (counts.NOT_IMPLEMENTED ? ` · ${counts.NOT_IMPLEMENTED} not implemented` : ""),
-            body: checkGrid(entry.results, { onPick: (r) => (finds.some((f) => f.result.rule_id === r.rule_id)
-              ? scrollToId(`finding-${r.rule_id}`) : resultPanel(entry, r)) }) })),
+            body: checkGrid(cur.results, { onPick: (r) => (finds.some((f) => f.result.rule_id === r.rule_id)
+              ? scrollToId(`finding-${r.rule_id}`) : resultPanel(cur, r)) }) })),
           section("sec-findings", h("section", { class: "stack", "aria-label": "Findings to decide" },
-            h("h3", { class: "card__title", text: finds.length ? `Findings to decide (${finds.length})` : "Findings to decide" }),
-            finds.length ? finds.map((f) => findingCard(entry, f, refresh, nameWatchers))
+            h("h3", { class: "card__title", text: finds.length ? `Findings to decide${onVersion} (${finds.length})` : "Findings to decide" }),
+            finds.length ? finds.map((f) => findingCard(cur, f, refresh, nameWatchers))
               : card({ body: emptyState({ icon: "check-check", title: "No finding", text: "Nothing on this claim needs a decision." }) }))),
           card({ title: "Service lines", flush: true, body: linesTable(c) }),
           card({ title: "Authorizations", flush: !!c.authorizations.length, body: authorizationsBlock(c) }),
-          card({ title: "Documents", body: attachmentsBlock(entry) }),
+          card({ title: "Documents", body: attachmentsBlock(cur) }),
           historyCard(entry),
           section("sec-received", card({ title: "Claim as received", body: h("details", { class: "disclosure" },
             h("summary", { text: "Show the JSON envelope (untrusted text shown as data)" }),
-            h("pre", { class: "untrusted", text: JSON.stringify(c, null, 2) })) }))),
+            h("pre", { class: "untrusted", text: JSON.stringify(entry.claim, null, 2) })) }))),
         h("div", { class: "sticky-side" }, nameCard(nameWatchers), progressHolder, partiesCard(c), coverageCard(c))));
   }
 

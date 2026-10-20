@@ -61,7 +61,7 @@ const EvaluationPage = (function () {
           const kind = k === "provider" && ai.provider === "mock" ? "mock" : k;
           return `${(Core.SOURCE[kind] || { label: k }).label}: ${Core.number(v)}`;
         }).join(" · ")],
-        ["Fallbacks", fallbacks.length ? fallbacks.map(([k, v]) => `${k}: ${v}`).join(" · ") : "None"],
+        ["Fallbacks", fallbacks.length ? fallbacks.map(([k, v]) => `${Core.FAILURE[k] || k}: ${Core.number(v)}`).join(" · ") : "None"],
       ]),
       callout({ tone: "info", icon: "info", title: "Explanation quality is scored by people",
         text: "The scorer checks statuses and evidence only. Explanations are scored by hand, on the 25 exercise cases." })) });

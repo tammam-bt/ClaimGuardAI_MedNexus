@@ -4,11 +4,12 @@ import json
 import re
 import shutil
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
 from claimguard.guards.rbac import (
-    PERMISSIONS, REVIEW_ACTIONS, PermissionDenied, allowed, authorize, authorize_event,
+    PERMISSIONS, REVIEW_ACTIONS, PermissionDenied, allowed, authorize, authorize_event, load_directory,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -62,6 +63,48 @@ class RbacTests(unittest.TestCase):
     def test_roles_are_closed(self):
         self.assertEqual(set(PERMISSIONS), {"reviewer", "admin"})
         self.assertTrue(PERMISSIONS["reviewer"] < PERMISSIONS["admin"])
+
+
+class DirectoryFileTests(unittest.TestCase):
+    """The actor directory is the one place a role comes from (E2)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def write(self, text):
+        path = self.dir / "actors.json"
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_the_shipped_example_loads(self):
+        directory = load_directory(ROOT / "actors.example.json")
+        self.assertTrue(directory)
+        self.assertTrue(set(directory.values()) <= set(PERMISSIONS))
+
+    def test_a_valid_directory_loads_unchanged(self):
+        self.assertEqual(load_directory(self.write(json.dumps(DIRECTORY))), DIRECTORY)
+
+    def test_a_bad_directory_is_refused_without_quoting_it(self):
+        cases = {
+            "not JSON": "{reviewer",
+            "not an object": json.dumps(["Reviewer 01"]),
+            "empty": "{}",
+            "unknown role": json.dumps({"Reviewer 01": "MARKER-7F3A"}),
+            "role not a string": json.dumps({"Reviewer 01": ["admin"]}),
+            "blank actor": json.dumps({"  ": "reviewer"}),
+        }
+        for name, text in cases.items():
+            with self.subTest(name), self.assertRaises(ValueError) as ctx:
+                load_directory(self.write(text))
+            self.assertNotIn("MARKER-7F3A", str(ctx.exception))
+
+    def test_a_missing_file_is_refused(self):
+        with self.assertRaises(ValueError):
+            load_directory(self.dir / "absent.json")
 
 
 @unittest.skipUnless(shutil.which("git") and (ROOT / ".git").exists(), "needs a git checkout")

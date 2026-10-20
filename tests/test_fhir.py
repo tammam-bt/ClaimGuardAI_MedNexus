@@ -120,6 +120,34 @@ class MalformedBundleTests(FhirCase):
         self.assertEqual(self.rejected(b"{not json")["stage"], "json")
         self.assertEqual(self.rejected([BUNDLE])["stage"], "fhir")
 
+    def test_malformed_input_matrix(self):
+        # Phase 2: "graceful error handling for malformed FHIR inputs". Each
+        # input gives exactly one ingestion error, never an exception.
+        line = json.dumps(BUNDLE).encode()
+        cases = {
+            "truncated JSON": (line[: len(line) // 2], "json"),
+            # Python 3.10-3.12 stop at the parser's recursion limit ("json");
+            # newer ones parse it and reject the list ("fhir"). Either is graceful.
+            "deep nesting": (b"[" * 5000 + b"]" * 5000, ("json", "fhir")),
+            "empty object": ({}, "fhir"),
+            "a string": (b'"hello"', "fhir"),
+            "entry not a list": (self.mutated(lambda b: b.update(entry="nope")), "fhir"),
+            "null entry": (self.mutated(lambda b: b["entry"].append(None)), "fhir"),
+            "entry without resource": (self.mutated(lambda b: b["entry"].append({"fullUrl": "x"})), "fhir"),
+            "not a Bundle": (self.mutated(lambda b: b.update(resourceType="Patient")), "fhir"),
+            "no Patient": (self.mutated(lambda b: b.update(entry=[e for e in b["entry"]
+                                                                if e["resource"]["resourceType"] != "Patient"])), "fhir"),
+            "not UTF-8": (b"\xff\xfe{}", "decode"),
+        }
+        for name, (bundle, stage) in cases.items():
+            with self.subTest(name):
+                self.assertIn(self.rejected(bundle)["stage"], stage if isinstance(stage, tuple) else (stage,))
+
+    def test_one_bad_bundle_never_costs_the_others(self):
+        result = self.ingest(b"{not json", {}, BUNDLE)
+        self.assertEqual([i.claim for i in result.accepted], [CLAIM])
+        self.assertEqual([e["provenance"]["line_number"] for e in result.errors], [1, 2])
+
     def test_fhir_and_sidecar_must_agree(self):
         cases = {
             "/total_amount": lambda b: resource(b, "Claim")["total"].update(value=-1),

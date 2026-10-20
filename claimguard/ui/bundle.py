@@ -12,7 +12,10 @@ down, and returns one JSON-ready dict that the page embeds:
                  (the hash review decisions and versions refer to), its
                  provenance, its 15 results, its route, its AI explanations
                  and its injection flag
-    rejected     the ingestion errors: claims that never reached the rules
+    rejected     the ingestion errors: claims that never reached the rules.
+                 With --complete such a claim also has 15 UNABLE_TO_ASSESS
+                 results for the scorer (DEC-013); it is listed here only,
+                 never under claims, since it has no valid version to review
     audit        the hash-chained audit log, if one was given: its events and
                  whether it verifies against its anchor
     evaluation   per-rule metrics, confusion matrices and mismatches against
@@ -36,7 +39,8 @@ from claimguard._pack import config, load_jsonl
 from claimguard.audit import chain
 from claimguard.evaluation.confusion import confusion_by_rule
 from claimguard.guards.rbac import PERMISSIONS
-from claimguard.review.correction import original
+from claimguard.ingest.jsonl import claims_by_id
+from claimguard.review.correction import version_hash
 from claimguard.review.routing import ROUTING_POLICY_VERSION, route_claim, route_run
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -92,7 +96,7 @@ def build(results_path, claims_path, *, manifest_path=None, explanations_path=No
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else None
     explanations = _read_jsonl(explanations_path or f"{results_path}.explanations.jsonl")
 
-    claims_in = {c["claim_id"]: c for c in load_jsonl(claims_path)}
+    claims_in = claims_by_id(claims_path)
     by_claim = {}
     for r in results:
         by_claim.setdefault(r["claim_id"], []).append(r)
@@ -110,9 +114,12 @@ def build(results_path, claims_path, *, manifest_path=None, explanations_path=No
     claims = []
     for cid, rows in by_claim.items():
         claim = claims_in[cid]
+        input_hash = version_hash(claim)
+        if input_hash is None:  # rejected at ingestion, completed for the scorer: see "rejected"
+            continue
         claims.append({
             "claim": claim,
-            "input_hash": original(claim).input_hash,
+            "input_hash": input_hash,
             "provenance": provenance.get(cid),
             "results": rows,
             "route": routes[cid],

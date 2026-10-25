@@ -30,7 +30,18 @@ jobs:
       - name: Starter pack integrity
         run: python src/validate_pack.py
 
+      - name: No environment file is tracked but .env.example
+        run: |
+          # .gitignore (a pack file) ignores only .env itself, at any depth.
+          found=$(git ls-files -- ':(glob)**/.env*' ':(glob)**/.env*/**' | grep -vx '.env.example' || true)
+          if [ -n "$found" ]; then
+            echo "::error::Tracked environment file(s): $found. Keep keys in .env, which git ignores."
+            exit 1
+          fi
+
       - name: Tests
+        env:
+          REQUIRE_E2E: "1"  # a missing Node or Chrome fails the run instead of skipping the e2e tests
         run: python -m unittest discover -s tests -v
 
       - name: Rules never read the current date or time

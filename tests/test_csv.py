@@ -69,8 +69,9 @@ class CsvCase(unittest.TestCase):
             return list(csv.reader(f))
 
     def write(self, name, rows):
-        with open(self.folder / f"{name}.csv", "w", encoding="utf-8", newline="") as f:
-            csv.writer(f, lineterminator="\n").writerows(rows)
+        # By hand, not csv.writer: on Python 3.10 it cannot write a NUL.
+        text = "".join(",".join('"' + v.replace('"', '""') + '"' for v in row) + "\n" for row in rows)
+        (self.folder / f"{name}.csv").write_text(text, encoding="utf-8", newline="")
 
     def set_cell(self, name, column, value, row=1):
         rows = self.rows(name)
@@ -138,6 +139,35 @@ class BadRowTests(CsvCase):
         result = read_csv_folder(self.folder)
         self.assertIn("UTF-8", self.only_error(result)["reason"])
         self.assertEqual(len(result.accepted), 399)
+
+    def test_nul_rejects_only_its_claim_on_every_version(self):
+        # Python 3.10's csv module cannot read a NUL and 3.11 can: the
+        # adapter gives the same answer on both.
+        for name, column in (("lines", "modifier"), ("claims", "notes")):
+            with self.subTest(file=name):
+                cid = self.set_cell(name, column, "a\x00b")
+                result = read_csv_folder(self.folder)
+                error = self.only_error(result)
+                self.assertEqual((error["stage"], error["claim_id"]), ("csv", cid))
+                self.assertIn("NUL", error["reason"])
+                self.assertEqual(len(result.accepted), 399)
+                shutil.copy(DEV_CSV / f"{name}.csv", self.folder / f"{name}.csv")
+
+    def test_an_unparseable_child_row_rejects_every_claim(self):
+        # The row's claim_id cannot be read, so whichever claim it belongs to
+        # would be accepted without it: no claim can be shown complete.
+        for name in ("coverage", "lines", "authorizations", "attachments"):
+            with self.subTest(file=name):
+                rows = self.rows(name)
+                rows[1][-1] = "x" * (csv.field_size_limit() + 1)  # csv.Error on every version
+                self.write(name, rows)
+                result = read_csv_folder(self.folder)
+                self.assertEqual(result.accepted, [])
+                self.assertEqual(result.records, 400)
+                self.assertEqual({e["stage"] for e in result.errors}, {"csv"})
+                self.assertEqual(sorted(e["claim_id"] for e in result.errors), sorted(c["claim_id"] for c in self.claims))
+                self.assertIn(f"{name}.csv line 2 cannot be parsed", result.errors[0]["reason"])
+                shutil.copy(DEV_CSV / f"{name}.csv", self.folder / f"{name}.csv")
 
     def test_version_dependent_date_is_rejected(self):
         self.set_cell("lines", "service_date", "20260525")

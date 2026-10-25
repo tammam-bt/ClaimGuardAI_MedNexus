@@ -21,6 +21,7 @@ import random
 import shutil
 import tempfile
 import unittest
+from collections import Counter
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -143,8 +144,10 @@ class CsvSweepTests(SweepCase):
         for path, i, j in rng.sample(cells, 600):
             tables[path][i][j] = rng.choice(CSV_JUNK)
         for path, rows in tables.items():
-            with path.open("w", encoding="utf-8", newline="") as f:
-                csv.writer(f, lineterminator="\r\n").writerows(rows)
+            # By hand, not csv.writer: on Python 3.10 it cannot write a NUL,
+            # and the NUL must reach the adapter on every version.
+            path.write_text("".join(",".join('"' + v.replace('"', '""') + '"' for v in row) + "\r\n" for row in rows),
+                            encoding="utf-8", newline="")
 
         result = read_csv_folder(folder)
         claim_ids = [c["claim_id"] for c in load_jsonl(DEV / "claims.jsonl")]
@@ -152,6 +155,13 @@ class CsvSweepTests(SweepCase):
         self.assertEqual(sorted({i.claim["claim_id"] for i in result.accepted} | rejected), sorted(claim_ids))
         self.assertTrue(result.accepted and result.errors)
         self.check_accepted(result.accepted)
+        # No accepted claim lost a row: each holds every row its files hold.
+        held = Counter((path.stem, row[0]) for path, rows in tables.items() if path.stem != "claims" for row in rows[1:])
+        for item in result.accepted:
+            c = item.claim
+            for name in ("lines", "authorizations", "attachments"):
+                self.assertEqual(len(c[name]), held[(name, c["claim_id"])], (c["claim_id"], name))
+            self.assertEqual(held[("coverage", c["claim_id"])], 1, c["claim_id"])
         # Accepted claims quote what the CSV holds; a rejected one is completed
         # citing only its claim_id, which is what the scorer's JSONL holds too.
         built_from = {cid: {"claim_id": cid} for cid in rejected}

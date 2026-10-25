@@ -8,7 +8,7 @@ Record any clarification or disagreement about a rule **before** changing expect
 2. Should a high-severity UNABLE_TO_ASSESS escalate like a FAIL, and should dismissing a high-severity finding need a second reviewer (DEC-004)?
 3. Where does "route low-confidence or high-severity cases for explicit human approval" come from? It is not in the starter pack.
 4. Is it acceptable that exercise notes (`untrusted_note`) never reach the model, by design?
-5. Please confirm each "team decision" in DEC-001 to DEC-013.
+5. Please confirm each "team decision" in DEC-001 to DEC-014.
 6. Can a held-out claim's `lines` be something other than a list of objects (null, a string)? `src/evaluate.py` then raises `TypeError` while checking line IDs, on any predictions, ours included (DEC-013).
 
 ## DEC-000 | Template
@@ -198,3 +198,16 @@ Record any clarification or disagreement about a rule **before** changing expect
 - **Not fixable on our side:** a claim whose `lines` is not a list of objects makes `src/evaluate.py` raise `TypeError` on every prediction file, ours included (open question 6).
 - **Resolution:** Team decision, pending the mentor (open question 1). Default if no answer: use `--complete` for the held-out run and disclose it in the evaluation report.
 - **Change made:** `complete_rejected()`, `scored_claim_ids()` and `_dumps()` in `claimguard/run.py`; `claims_by_id()` in `claimguard/ingest/jsonl.py`; `version_hash()` in `claimguard/ui/decisions.py`, also used by `claimguard/ui/bundle.py`. Tests: `CompleteOutputTests` in `tests/test_run_cli.py`; `test_malformed_input_matrix` and `test_one_bad_bundle_never_costs_the_others` in `tests/test_fhir.py`; the seeded sweeps in `tests/test_ingest_fuzz.py`; `tests/test_rejected_claims.py`.
+
+## DEC-014 | A CSV row that cannot be parsed, and NUL characters
+
+- **Date / author:** 2026-10-25 / Mohammed Aziz Kadri
+- **Rule:** all (ingestion, `claimguard/ingest/csv_folder.py`)
+- **Question:** doc 03 joins the CSV files by `claim_id`. What if a row of `lines.csv`, `coverage.csv`, `authorizations.csv` or `attachments.csv` cannot be parsed at all, so its `claim_id` is unreadable? And Python 3.10's `csv` module cannot read a NUL character, while 3.11 and later can.
+- **Smallest example:** development claim CG-27BFD8541DEB with one `lines.csv` cell longer than `csv.field_size_limit()` (131,072 characters). Before this change the row was logged as an `orphan_row` and the claim was **accepted with 1 line instead of 2**, on every Python version; on 3.10 a NUL anywhere in a child row did the same. CI on 3.10 had been red since 61624eb because the fuzz test's own fixture could not write the NUL.
+- **Expected (gold) vs our reading:** No public CSV row has either problem, so the gold is silent. Our reading: a claim must never be checked with a row missing, because an incomplete claim can look clean.
+  - **Fail closed:** a child row that cannot be parsed rejects every claim in the folder, with a reason such as "lines.csv line 2 cannot be parsed, so no claim can be shown complete". Recovering the `claim_id` from the raw line was considered and not done: it is more code to get right, for input that should never occur.
+  - **NUL:** rejected on every version with "row holds a NUL character", on the claim it belongs to. The adapter swaps NUL for a placeholder before parsing, so 3.10 and 3.12 give the same answer.
+  - A `claims.csv` row that cannot be parsed keeps its reason, "row is not valid CSV"; its child rows are orphans, as before.
+- **Resolution:** Team decision, pending the mentor (open question 5).
+- **Change made:** `claimguard/ingest/csv_folder.py` (adapter version 1.1.0). Tests: `test_nul_rejects_only_its_claim_on_every_version` and `test_an_unparseable_child_row_rejects_every_claim` in `tests/test_csv.py`; the CSV sweep in `tests/test_ingest_fuzz.py` writes its tables by hand, keeps NUL, and checks that no accepted claim lost a row.

@@ -19,15 +19,25 @@ Rows use the same format and hash as src/audit.py, so the pack's own verifier
 Tamper-evident, not immutable: whoever controls both the log and the anchor
 can rewrite both, unless the head is also recorded somewhere they cannot
 change. Production needs append-only (WORM) storage and an anchor held
-outside the system's control. Concurrent writers are not supported.
+outside the system's control.
+
+A writer holds <log>.lock from verify to anchor update, so a second writer
+is refused, never interleaved; a lock left by a crash is removed by a
+person, not broken automatically. The anchor is replaced in one step and
+checked before use, so a malformed one is an AuditError, not a crash. A
+crash between the log write and the anchor write leaves the log ahead of its
+anchor, which verifies. A crash in the middle of the log write leaves a
+partial last line, which fails verification with no recovery: a known limit.
 """
 import argparse
 import hashlib
 import json
+import os
 import re
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Set, Tuple
 
 GENESIS = "0" * 64
 REVIEW_ACTIONS = {"confirm_issue", "dismiss_with_reason", "request_information", "mark_corrected_for_recheck"}
@@ -58,6 +68,51 @@ def digest(obj: Any) -> str:
 
 def default_anchor(log) -> str:
     return str(Path(log).with_suffix("")) + ".head.json"
+
+
+def lock_path(log) -> Path:
+    return Path(str(log) + ".lock")
+
+
+@contextmanager
+def writer_lock(log) -> Iterator[None]:
+    """Hold <log>.lock, created exclusively, or refuse with AuditError. The
+    log's folder is made first, so a fresh path can be locked."""
+    path = lock_path(log)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.close(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+    except FileExistsError:
+        raise AuditError(f"another command is writing this audit log: {path} exists. Remove that file only "
+                         "if no ClaimGuard command is running (a crash can leave it behind)") from None
+    try:
+        yield
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def _read_anchor(anchor) -> Tuple[int, str]:
+    """(count, head) from an anchor file, or AuditError if it is unreadable or
+    not {"count": an integer of at least 0, "head": 64 lowercase hex}."""
+    try:
+        recorded = json.loads(Path(anchor).read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # JSONDecodeError and UnicodeDecodeError are ValueErrors
+        raise AuditError("the anchor cannot be read as JSON: it was damaged or replaced") from None
+    count, head = (recorded.get("count"), recorded.get("head")) if isinstance(recorded, dict) else (None, None)
+    if isinstance(count, bool) or not isinstance(count, int) or count < 0 or not isinstance(head, str) \
+            or not re.fullmatch(r"[0-9a-f]{64}", head):
+        raise AuditError("the anchor is malformed: it needs a count of at least 0 and a head of "
+                         "64 lowercase hexadecimal characters")
+    return count, head
+
+
+def _write_anchor(anchor, count: int, head: str) -> None:
+    """Write <anchor>.tmp, then replace the anchor with it in one step."""
+    path = Path(anchor)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = Path(str(anchor) + ".tmp")
+    tmp.write_text(json.dumps({"count": count, "head": head}) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def _check(event: Mapping[str, Any]) -> None:
@@ -116,10 +171,10 @@ def verify(log, anchor: Optional[str] = None, expect: Optional[Tuple[int, str]] 
     hashes = _hashes(log)
     head, count = (hashes[-1] if hashes else GENESIS), len(hashes)
     if anchor and Path(anchor).exists():
-        recorded = json.loads(Path(anchor).read_text(encoding="utf-8"))
-        if count < recorded["count"]:
-            raise AuditError(f"log has {count} events but the anchor recorded {recorded['count']}: events were removed")
-        if recorded["count"] and hashes[recorded["count"] - 1] != recorded["head"]:
+        recorded_count, recorded_head = _read_anchor(anchor)
+        if count < recorded_count:
+            raise AuditError(f"log has {count} events but the anchor recorded {recorded_count}: events were removed")
+        if recorded_count and hashes[recorded_count - 1] != recorded_head:
             raise AuditError("the anchored head does not match the log: the log was rewritten")
     elif anchor and count:
         raise MissingAnchor(f"log has {count} events but its anchor is missing: the log may have been rewritten")
@@ -133,17 +188,17 @@ def restore_anchor(log, anchor: str, expect: Tuple[int, str], *, trust_later: bo
     verify and event count has the head recorded outside this machine. Never
     over an existing anchor: overwriting one would hide a rewrite. Events
     after that one are checked against nothing, so they are refused unless
-    trust_later is given."""
-    if Path(anchor).exists():
-        raise AuditError("an anchor already exists: restoring over it would hide a rewrite")
-    hashes = _hashes(log)
-    _check_expected(hashes, expect)
-    later = len(hashes) - expect[0]
-    if later and not trust_later:
-        raise AuditError(f"{later} event(s) after event {expect[0]} are vouched for by nothing outside this machine; "
-                         "record a newer head, or accept them explicitly")
-    Path(anchor).parent.mkdir(parents=True, exist_ok=True)
-    Path(anchor).write_text(json.dumps({"count": len(hashes), "head": hashes[-1]}) + "\n", encoding="utf-8")
+    trust_later is given. Holds the writer lock, like append."""
+    with writer_lock(log):
+        if Path(anchor).exists():
+            raise AuditError("an anchor already exists: restoring over it would hide a rewrite")
+        hashes = _hashes(log)
+        _check_expected(hashes, expect)
+        later = len(hashes) - expect[0]
+        if later and not trust_later:
+            raise AuditError(f"{later} event(s) after event {expect[0]} are vouched for by nothing outside "
+                             "this machine; record a newer head, or accept them explicitly")
+        _write_anchor(anchor, len(hashes), hashes[-1])
     return hashes[-1], len(hashes)
 
 
@@ -151,28 +206,27 @@ def append(log, events: Sequence[Mapping[str, Any]], anchor: Optional[str] = Non
     """Append events after verifying the chain; update the anchor. All or nothing:
     every row is hashed and encoded before the first byte is written, so an
     event that cannot be recorded (text that is not valid Unicode, a value
-    that is not JSON) refuses the whole batch with AuditError."""
-    head, count = verify(log, anchor)
-    for event in events:
-        _check(event)
-    lines: List[bytes] = []
-    for position, event in enumerate(events, start=1):
-        row = {"sequence": count + 1, "recorded_at": datetime.now(timezone.utc).isoformat(),
-               "previous_hash": head, "event": dict(event)}
-        try:
-            head = digest(row)
-            lines.append((json.dumps({**row, "hash": head}, ensure_ascii=False) + "\n").encode("utf-8"))
-        except (TypeError, ValueError) as e:  # UnicodeEncodeError is a ValueError
-            raise AuditError(f"event {position} of the batch cannot be recorded ({type(e).__name__}); "
-                             "nothing was written") from None
-        count += 1
-    path = Path(log)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("ab") as fh:
-        fh.write(b"".join(lines))
-    if anchor:
-        Path(anchor).parent.mkdir(parents=True, exist_ok=True)
-        Path(anchor).write_text(json.dumps({"count": count, "head": head}) + "\n", encoding="utf-8")
+    that is not JSON) refuses the whole batch with AuditError. A second
+    writer is refused: the writer lock is held from verify to anchor update."""
+    with writer_lock(log):
+        head, count = verify(log, anchor)
+        for event in events:
+            _check(event)
+        lines: List[bytes] = []
+        for position, event in enumerate(events, start=1):
+            row = {"sequence": count + 1, "recorded_at": datetime.now(timezone.utc).isoformat(),
+                   "previous_hash": head, "event": dict(event)}
+            try:
+                head = digest(row)
+                lines.append((json.dumps({**row, "hash": head}, ensure_ascii=False) + "\n").encode("utf-8"))
+            except (TypeError, ValueError) as e:  # UnicodeEncodeError is a ValueError
+                raise AuditError(f"event {position} of the batch cannot be recorded ({type(e).__name__}); "
+                                 "nothing was written") from None
+            count += 1
+        with Path(log).open("ab") as fh:
+            fh.write(b"".join(lines))
+        if anchor:
+            _write_anchor(anchor, count, head)
     return head, count
 
 

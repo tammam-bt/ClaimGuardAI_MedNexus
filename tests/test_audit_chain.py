@@ -12,7 +12,7 @@ from pathlib import Path
 from claimguard._pack import config, load_jsonl
 from claimguard.ai.watchdog import explain_safely
 from claimguard.audit.chain import (
-    GENESIS, AuditError, MissingAnchor, append, default_anchor, restore_anchor, verify,
+    GENESIS, AuditError, MissingAnchor, append, default_anchor, lock_path, restore_anchor, verify,
 )
 from claimguard.audit.chain import main as chain_main
 from claimguard.engine.runner import Engine
@@ -246,6 +246,84 @@ class AnchorTests(unittest.TestCase):
             with self.subTest(args=args), redirect_stdout(io.StringIO()), \
                     unittest.mock.patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit):
                 chain_main(["--log", str(self.log), *args])
+
+
+MALFORMED_ANCHORS = {
+    "truncated": lambda good: good[: len(good) // 2],
+    "empty": lambda good: b"",
+    "not UTF-8": lambda good: b"\xff\xfe" + good,
+    "a list": lambda good: b"[]",
+    "head missing": lambda good: json.dumps({"count": json.loads(good)["count"]}).encode(),
+    "count a string": lambda good: json.dumps({**json.loads(good), "count": "3"}).encode(),
+    "count negative": lambda good: json.dumps({**json.loads(good), "count": -1}).encode(),
+    "count a boolean": lambda good: json.dumps({**json.loads(good), "count": True}).encode(),
+    "head upper case": lambda good: json.dumps({**json.loads(good), "head": json.loads(good)["head"].upper()}).encode(),
+    "head too short": lambda good: json.dumps({**json.loads(good), "head": "abc"}).encode(),
+}
+
+
+class WriterLockTests(unittest.TestCase):
+    """M4: a second writer is refused; the anchor is replaced in one step."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.log = Path(self.tmp.name) / "audit.jsonl"
+        self.anchor = default_anchor(self.log)
+        self.head, _ = append(self.log, [review(claim_id="CG-0")], self.anchor)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_a_second_writer_is_refused_and_writes_nothing(self):
+        lock_path(self.log).write_text("", encoding="utf-8")  # as a running command holds it
+        before = (self.log.read_bytes(), Path(self.anchor).read_bytes())
+        with self.assertRaisesRegex(AuditError, "another command is writing this audit log"):
+            append(self.log, [review(claim_id="CG-1")], self.anchor)
+        self.assertEqual((self.log.read_bytes(), Path(self.anchor).read_bytes()), before)
+        self.assertTrue(lock_path(self.log).exists())  # the refused writer leaves the holder's lock alone
+        Path(self.anchor).unlink()
+        with self.assertRaisesRegex(AuditError, "another command is writing"):
+            restore_anchor(self.log, self.anchor, (1, self.head))
+        self.assertFalse(Path(self.anchor).exists())
+
+    def test_appends_leave_no_lock_and_no_temporary_anchor(self):
+        append(self.log, [review(claim_id="CG-1")], self.anchor)
+        with self.assertRaises(AuditError):
+            append(self.log, [{"event": "nonsense"}], self.anchor)  # a refused batch releases the lock too
+        Path(self.anchor).unlink()
+        restore_anchor(self.log, self.anchor, (2, verify(self.log)[0]))
+        self.assertEqual(sorted(p.name for p in Path(self.tmp.name).iterdir()), ["audit.head.json", "audit.jsonl"])
+
+    def test_a_log_in_a_new_folder_can_be_locked(self):
+        log = Path(self.tmp.name) / "new" / "folder" / "audit.jsonl"
+        self.assertEqual(append(log, [review()], default_anchor(log))[1], 1)
+        self.assertFalse(lock_path(log).exists())
+
+    def test_a_malformed_anchor_raises_audit_error(self):
+        good = Path(self.anchor).read_bytes()
+        before = self.log.read_bytes()
+        for name, damage in MALFORMED_ANCHORS.items():
+            Path(self.anchor).write_bytes(damage(good))
+            with self.subTest(name), self.assertRaisesRegex(AuditError, "the anchor (is malformed|cannot be read)"):
+                verify(self.log, self.anchor)
+            with self.subTest(name), self.assertRaises(AuditError):
+                append(self.log, [review(claim_id="CG-1")], self.anchor)
+            self.assertEqual(self.log.read_bytes(), before)
+            with self.subTest(name), redirect_stdout(io.StringIO()) as printed:
+                self.assertEqual(chain_main(["--log", str(self.log)]), 1)
+            self.assertIn("Audit chain INVALID: the anchor", printed.getvalue())
+        Path(self.anchor).write_bytes(good)
+        self.assertEqual(verify(self.log, self.anchor), (self.head, 1))
+
+    def test_a_run_refused_by_the_lock_exits_2_and_records_nothing(self):
+        lock_path(self.log).write_text("", encoding="utf-8")
+        before = self.log.read_bytes()
+        with redirect_stdout(io.StringIO()) as printed:
+            code = run_main(["--strict", "--input", str(STRESS), "--output", str(Path(self.tmp.name) / "p.jsonl"),
+                             "--audit-log", str(self.log)])
+        self.assertEqual(code, 2)
+        self.assertIn("another command is writing", printed.getvalue())
+        self.assertEqual(self.log.read_bytes(), before)
 
 
 class RunWritesAuditTests(unittest.TestCase):

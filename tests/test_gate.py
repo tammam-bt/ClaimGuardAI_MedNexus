@@ -71,6 +71,38 @@ class DevelopmentTests(GateCase):
         self.assertEqual(self.gate(), 1)
 
 
+class AnchorGateTests(GateCase):
+    """M2 + M3: the gate judges nothing on a log whose anchor is missing, or
+    whose head no longer matches one recorded outside this machine."""
+
+    def setUp(self):
+        super().setUp()
+        self.run_claims((DEV / "claims.jsonl").read_text(encoding="utf-8").splitlines()[:3])
+        self.head, self.count = chain.verify(self.log, chain.default_anchor(self.log))
+
+    def test_a_matching_head_is_judged_and_a_mismatch_exits_2(self):
+        self.assertIn(self.gate("--expect-count", str(self.count), "--expect-head", self.head), (0, 1))
+        self.assertEqual(self.gate("--expect-count", str(self.count), "--expect-head", "0" * 64), 2)
+        self.assertEqual(self.gate("--expect-count", str(self.count + 1), "--expect-head", self.head), 2)
+        with self.assertRaises(GateError):
+            judge(self.results, self.claims, self.log, DIRECTORY, expect=(self.count, "0" * 64))
+
+    def test_a_missing_anchor_exits_2_and_names_the_way_out(self):
+        Path(chain.default_anchor(self.log)).unlink()
+        with contextlib.redirect_stdout(io.StringIO()) as printed:
+            code = main(["--results", str(self.results), "--claims", str(self.claims), "--log", str(self.log),
+                         "--directory", str(self.directory)])
+        self.assertEqual(code, 2)
+        self.assertIn("anchor is missing", printed.getvalue())
+        self.assertIn("--restore-anchor", printed.getvalue())
+
+    def test_prints_the_head_to_record_outside(self):
+        with contextlib.redirect_stdout(io.StringIO()) as printed:
+            main(["--results", str(self.results), "--claims", str(self.claims), "--log", str(self.log),
+                  "--directory", str(self.directory)])
+        self.assertIn(f"--expect-count {self.count} --expect-head {self.head}", printed.getvalue())
+
+
 class ScenarioTests(GateCase):
     def setUp(self):
         super().setUp()

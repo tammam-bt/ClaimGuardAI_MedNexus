@@ -34,7 +34,14 @@ class TamperDemoTests(unittest.TestCase):
         self.assertIn("invalid at event", outcome["one event edited"])
         self.assertIn("removed", outcome["last event removed"])
         self.assertIn("rewritten", outcome["history rewritten"])
+        self.assertIn("anchor is missing", outcome["anchor deleted, history rewritten"])
         self.assertTrue(outcome["log and anchor both rewritten"].startswith("NOT detected"))
+        self.assertIn("recorded outside this machine", outcome["both rewritten, head held outside"])
+
+    def test_a_log_without_its_anchor_is_refused(self):
+        Path(self.anchor).unlink()
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(main(["--log", str(self.log)]), 1)
 
     def test_the_real_log_is_only_read(self):
         before = (self.log.read_bytes(), Path(self.anchor).read_bytes())

@@ -142,8 +142,12 @@ def main(argv=None):
                                    claims_path=a.claims, results_path=a.results, corrections=a.corrections)
     except (ValueError, chain.AuditError) as e:
         print(e)
+        if isinstance(e, chain.MissingAnchor):
+            print(chain.RESTORE_HINT)
         return 1
     print(json.dumps(summary, indent=2))
+    if summary["events_in_chain"]:
+        print(chain.record_hint(summary["events_in_chain"], summary["head"]))
     return 0
 
 

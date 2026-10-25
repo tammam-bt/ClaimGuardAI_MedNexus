@@ -49,7 +49,7 @@ The page speaks a claims reviewer's language: it shows no command, file path of 
        --directory actors.json --results outputs/dev_predictions.jsonl --claims data/development/claims.jsonl
    ```
 
-   Every decision is checked first: the event format, the role (`claimguard.guards.rbac`), the date, that it was taken on this version of the claim, on a finding of this run, at its current status. One bad decision writes nothing. Appending the same file twice adds nothing. `--directory` is required: it maps each name to a role, in the format of `actors.example.json`. A name that is not in it records nothing, and neither does a role that is not `reviewer` or `admin`.
+   Every decision is checked first: the event format, the role (`claimguard.guards.rbac`), the date, that it was taken on this version of the claim, on a finding of this run, at its current status. One bad decision writes nothing. Appending the same file twice adds nothing. `--directory` is required: it maps each name to a role, in the format of `actors.example.json`. A name that is not in it records nothing, and neither does a role that is not `reviewer` or `admin`. The command ends by printing the log's count and head: record them outside this machine (see *The gate*).
 4. Rebuild the page: the decisions now count in every stage, counter and history.
 
 A finding is settled only by **Dismiss with reason**. A check that did not run can never be dismissed.
@@ -84,7 +84,8 @@ python -m claimguard.review.gate --results outputs/dev_predictions.jsonl --claim
     --log outputs/audit.jsonl --directory actors.json --corrections outputs/corrections --output outputs/gate.jsonl
 ```
 
-- It verifies the audit chain first; a chain that does not verify judges nothing (exit 2).
+- It verifies the audit chain first; a chain that does not verify judges nothing (exit 2). That includes a log with events and no anchor file.
+- With `--expect-count N --expect-head HASH`, a count and head recorded outside this machine, it also checks that event N still has that head, and exits 2 if not. It ends by printing the current count and head to record. See `docs/PRIVACY_SECURITY.md` for where the team keeps them and how to restore a lost anchor.
 - Each claim is judged on its latest version. It is **ready** when nothing is flagged, or when every flagged finding was dismissed with a reason, by an actor the directory allows, on that version and that status.
 - Otherwise it is **blocked**, in the page's own words: to review, in review, correction needed, waiting for information, awaiting recheck, or rechecked. A claim ingestion rejected, or one with no results, is blocked too.
 - It exits 0 only when every claim is ready, so a submission step can rely on it. With no decisions, development gives 136 ready and 264 blocked, as the dashboard shows.

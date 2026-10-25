@@ -142,12 +142,13 @@ class EndToEndTests(unittest.TestCase):
     def test_audit_page_follows_the_role(self):
         a = self.out["audit"]
         self.assertIn("Valid", a["reviewer"]["page"])
-        self.assertIn("6 run events hidden for your role", a["reviewer"]["page"])
+        self.assertIn("7 run events hidden for your role", a["reviewer"]["page"])
+        self.assertIn("Reviewer names are self-declared; the log records who appended them.", a["reviewer"]["page"])
         self.assertEqual(a["reviewer"]["count"], "0 of 0 events")
-        for gone in ("python -m", "Adding decisions", "view_run_events", "(doc"):
+        for gone in ("python -m", "Adding decisions", "view_run_events", "(doc", "OS user"):
             self.assertNotIn(gone, a["reviewer"]["page"])
-        self.assertEqual(a["admin"]["count"], "6 of 6 events")
-        self.assertEqual(a["admin"]["types"][0], "Run finished")
+        self.assertEqual(a["admin"]["count"], "7 of 7 events")
+        self.assertEqual(a["admin"]["types"][:2], ["Append performed", "Run finished"])  # latest first
         self.assertEqual(a["admin"]["types"][-1], "Run started")
 
     def test_settings(self):
@@ -162,7 +163,8 @@ class EndToEndTests(unittest.TestCase):
             self.assertNotIn(gone, s["page"])
         rows = {r[0]: r[1:] for r in s["rbacRows"]}  # plain action names, no code identifier beside them
         self.assertEqual(rows["Dismiss with reason"], ["Allowed", "Allowed"])
-        self.assertEqual(rows["See run events (runs, rejections, flags, model failures)"], ["Not allowed", "Allowed"])
+        self.assertEqual(rows["See run events (runs, rejections, flags, model failures, who ran each append)"],
+                         ["Not allowed", "Allowed"])
         self.assertTrue(s["confirmShown"])
         self.assertEqual(s["keptDrafts"], 2)
 

@@ -108,6 +108,7 @@ const Core = (function () {
     model_failure: { label: "Model failure (fallback)", icon: "alert-triangle", tone: "unknown" },
     review_decision: { label: "Review decision", icon: "user", tone: "pass" },
     version_created: { label: "New claim version", icon: "refresh", tone: "info" },
+    append_performed: { label: "Append performed", icon: "stamp", tone: "neutral" },
   };
 
   const STAGES = [

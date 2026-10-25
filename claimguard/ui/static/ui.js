@@ -416,11 +416,16 @@ function explainerLine() {
 }
 
 // ----------------------------------------------------------- audit events
-// Run events (runs, rejections, flags, model failures) need the
-// view_run_events permission (claimguard.guards.rbac): admins only. Review
-// decisions and new versions are visible to every role.
-const RUN_EVENT_TYPES = ["run_started", "run_finished", "ingestion_error", "injection_flag", "model_failure"];
+// Run events (runs, rejections, flags, model failures, and who ran each
+// append) need the view_run_events permission (claimguard.guards.rbac):
+// admins only. append_performed holds an OS user name, personal data the
+// chain can never erase. Review decisions and new versions are visible to
+// every role.
+const RUN_EVENT_TYPES = ["run_started", "run_finished", "ingestion_error", "injection_flag", "model_failure",
+  "append_performed"];
 function canSeeEvent(e) { return !RUN_EVENT_TYPES.includes(e.event) || can("view_run_events"); }
+// The command that appended a batch, in words (claimguard/audit/chain.py).
+const APPENDED_BY = { "claimguard.run": "Run", "claimguard.ui.decisions": "Decisions", "claimguard.review.correct": "Correction" };
 function eventBadge(e) {
   const t = Core.EVENT[e.event] || { label: String(e.event), icon: "info", tone: "neutral" };
   return badge(t.label, { tone: t.tone, icon: t.icon });
@@ -441,6 +446,8 @@ function eventSummary(e) {
       return `${e.rule_id} · ${(Core.ACTION[e.action] || { label: e.action }).label} by ${e.actor}: ${e.reason}`;
     case "version_created":
       return `v${e.version} by ${e.actor}: ${Core.plural((e.changes || []).length, "change")} · ${e.reason}`;
+    case "append_performed":
+      return `${APPENDED_BY[e.command] || e.command}: ${Core.plural(e.events, "event")} appended by OS user ${e.os_user} · input ${Core.shortHash(e.input_sha256)}`;
     default: return "";
   }
 }

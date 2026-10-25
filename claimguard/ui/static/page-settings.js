@@ -8,7 +8,7 @@ const SettingsPage = (function () {
   const ACTION_LABELS = {
     view_claim: "View claims", view_findings: "View findings", export_decisions: "Download decisions",
     run_pipeline: "Run the pipeline", append_audit: "Append to the audit log", verify_audit: "Verify the audit log",
-    view_run_events: "See run events (runs, rejections, flags, model failures)", change_ai_settings: "Change AI settings",
+    view_run_events: "See run events (runs, rejections, flags, model failures, who ran each append)", change_ai_settings: "Change AI settings",
   };
 
   function youCard() {

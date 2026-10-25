@@ -11,6 +11,7 @@ import subprocess
 import unittest
 from pathlib import Path
 
+from claimguard.audit.chain import EVENT_FIELDS
 from claimguard.review.routing import outstanding
 from claimguard.ui.page import JS_FILES, STATIC
 
@@ -264,6 +265,10 @@ class CoreLogicTests(unittest.TestCase):
         self.assertEqual(node("input.map(Core.plain)", values),
                          ["—", "—", "active", "1,510", "0.5", "Yes", "None", "a, b",
                           "L1 · Modifier: — · Quantity: 2", "Status: approved\nMax quantity: 10"])
+
+    def test_every_chain_event_type_has_a_label(self):
+        # The audit page's type filter lists only the types Core.EVENT names.
+        self.assertEqual(set(node("Object.keys(Core.EVENT)", None)), set(EVENT_FIELDS))
 
     def test_explanation_labels_are_honest(self):
         labels = node("Object.fromEntries(Object.entries(Core.SOURCE).map(([k, v]) => [k, v.label]))", None)

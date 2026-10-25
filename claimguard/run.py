@@ -11,7 +11,9 @@
   explain  with --explain, the AI explainer on FAIL and UNABLE_TO_ASSESS
            results, watchdog-guarded, written to <output>.explanations.jsonl,
            never into the scored results.
-  record   the run manifest, <output>.manifest.json.
+  record   the run manifest, <output>.manifest.json; with --audit-log, the
+           run's events in one batch, ending with append_performed (the OS
+           user who ran it and the input's SHA-256).
 
 With --complete, every claim the scorer will read gets its 15 results even if
 ingestion rejected it: all UNABLE_TO_ASSESS, citing only /claim_id, flagged
@@ -178,7 +180,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
         })
         try:
-            chain.append(a.audit_log, [{**e, "run_id": run_id} for e in events], anchor)
+            chain.append(a.audit_log, [{**e, "run_id": run_id} for e in events], anchor,
+                         performed=("claimguard.run", ingested.source_sha256))
         except chain.AuditError as e:
             print(f"Audit log refused this run's events, so none were recorded: {e}")
             if isinstance(e, chain.MissingAnchor):

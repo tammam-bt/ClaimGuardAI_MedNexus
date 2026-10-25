@@ -82,11 +82,12 @@ flowchart LR
 8. **Record the run.**
    - The run manifest is written beside the results, with the SHA-256 of the input, of each accepted record, and of the results and explanations files.
    - The run's events (start, ingestion errors, injection flags, model failures, and a finish event carrying the manifest's hash) are appended to the hash chain in one batch, and the head is anchored.
+   - Every command that appends (the run, decisions, corrections) ends its batch with one `append_performed` event: the command, the OS user who ran it, the SHA-256 of the file it read, and how many events it added. Only admins see it on the page.
    - A results or explanations file changed after the run therefore no longer matches the chain.
 9. **Review.** `python -m claimguard.ui` builds one offline HTML page from the run's results, manifest, explanations and verified audit chain.
    - A reviewer decides each finding with a reason. Decisions stay in that browser until they are downloaded.
    - `python -m claimguard.ui.decisions` checks every decision against the run's claims and results, which it requires: event format, the actor's role (`claimguard.guards.rbac`), the date, that it was taken on this version of the claim, and on a finding at its current status.
-   - It then appends all of them as `review_decision` events, or none.
+   - It then appends all of them as `review_decision` events, then one `append_performed`, or none.
 10. **Correct.** `python -m claimguard.review.correct` applies a JSON Patch, creating a new immutable version linked to its parent by hash.
     - Each correction builds on the latest stored version: version 2, then 3, and so on. The stored versions are replayed from the claim as received first, and one that is not exactly its parent plus its recorded changes refuses the correction.
     - All 15 rules re-run on it, and the status changes are reported.
@@ -117,7 +118,7 @@ flowchart LR
 
 ## Known limitations
 
-- **Tamper-evident, not immutable.** Whoever controls both the log and its anchor can rewrite both. There is a single writer only. Production needs append-only (WORM) storage and an anchor held outside the system.
+- **Tamper-evident, not immutable.** Whoever controls both the log and its anchor can rewrite both. A second writer is refused while `<log>.lock` exists. Production needs append-only (WORM) storage and an anchor held outside the system.
 - **The official scorer checks format and statuses, not meaning.** It accepts:
   - a wrong severity;
   - invented `method` or `review_status` values;

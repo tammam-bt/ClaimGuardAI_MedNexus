@@ -1,4 +1,5 @@
 """Tests for the audit chain (claimguard.audit.chain)."""
+import getpass
 import hashlib
 import importlib.util
 import io
@@ -61,7 +62,8 @@ class ChainTests(unittest.TestCase):
 
     def test_the_packs_own_verifier_accepts_our_log(self):
         self.three()
-        self.assertEqual(pack_audit().verify(self.log)[1], 3)
+        append(self.log, [review(claim_id="CG-3")], self.anchor, performed=("claimguard.ui.decisions", "a" * 64))
+        self.assertEqual(pack_audit().verify(self.log)[1], 5)  # append_performed included
 
     def test_edited_event_detected(self):
         self.three()
@@ -326,6 +328,47 @@ class WriterLockTests(unittest.TestCase):
         self.assertEqual(self.log.read_bytes(), before)
 
 
+class AppendPerformedTests(unittest.TestCase):
+    """M5: each command's batch ends with exactly one append_performed."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.log = Path(self.tmp.name) / "audit.jsonl"
+        self.anchor = default_anchor(self.log)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def events(self):
+        return [row["event"] for row in load_jsonl(self.log)] if self.log.exists() else []
+
+    def test_one_per_batch_closing_it(self):
+        batch = [review(claim_id=f"CG-{i}") for i in range(3)]
+        self.assertEqual(append(self.log, batch, self.anchor, performed=("claimguard.ui.decisions", "b" * 64))[1], 4)
+        self.assertEqual(self.events()[:3], batch)
+        self.assertEqual(self.events()[3], {"event": "append_performed", "command": "claimguard.ui.decisions",
+                                            "os_user": getpass.getuser(), "input_sha256": "b" * 64, "events": 3})
+        append(self.log, [review(claim_id="CG-3")], self.anchor, performed=("claimguard.review.correct", "c" * 64))
+        self.assertEqual([e["events"] for e in self.events() if e["event"] == "append_performed"], [3, 1])
+
+    def test_an_empty_batch_writes_none(self):
+        append(self.log, [review()], self.anchor, performed=("claimguard.ui.decisions", "b" * 64))
+        before = self.log.read_bytes()
+        self.assertEqual(append(self.log, [], self.anchor, performed=("claimguard.ui.decisions", "b" * 64))[1], 2)
+        self.assertEqual(self.log.read_bytes(), before)
+
+    def test_an_unknown_os_user_never_fails_the_append(self):
+        # From 3.13 getpass.getuser() raises OSError when it finds no user.
+        for error in (OSError("no user"), KeyError("uid"), ImportError("pwd")):
+            with self.subTest(error=type(error).__name__),                     unittest.mock.patch("claimguard.audit.chain.getpass.getuser", side_effect=error):
+                append(self.log, [review()], self.anchor, performed=("claimguard.run", "d" * 64))
+            self.assertEqual(self.events()[-1]["os_user"], "unknown")
+
+    def test_without_a_command_nothing_is_added(self):
+        append(self.log, [review()], self.anchor)  # library use, as the tamper demonstration does
+        self.assertEqual([e["event"] for e in self.events()], ["review_decision"])
+
+
 class RunWritesAuditTests(unittest.TestCase):
     def test_run_records_start_flags_and_finish(self):
         with tempfile.TemporaryDirectory() as d:
@@ -335,11 +378,16 @@ class RunWritesAuditTests(unittest.TestCase):
             self.assertEqual(code, 0)
             events = [json.loads(l)["event"] for l in log.read_text(encoding="utf-8").splitlines()]
             kinds = [e["event"] for e in events]
-            self.assertEqual((kinds[0], kinds[-1]), ("run_started", "run_finished"))
+            self.assertEqual((kinds[0], kinds[-2], kinds[-1]), ("run_started", "run_finished", "append_performed"))
+            self.assertEqual(kinds.count("append_performed"), 1)
+            performed = events[-1]
+            self.assertEqual((performed["command"], performed["input_sha256"], performed["events"]),
+                             ("claimguard.run", events[0]["input_sha256"], len(events) - 1))
+            self.assertEqual(performed["input_sha256"], hashlib.sha256(STRESS.read_bytes()).hexdigest())
             self.assertTrue(kinds.count("injection_flag") >= 1)
-            self.assertEqual(len({e["run_id"] for e in events}), 1)
+            self.assertEqual(len({e["run_id"] for e in events[:-1]}), 1)
             manifest = Path(f"{out}.manifest.json")
-            self.assertEqual(events[-1]["manifest_sha256"], hashlib.sha256(manifest.read_bytes()).hexdigest())
+            self.assertEqual(events[-2]["manifest_sha256"], hashlib.sha256(manifest.read_bytes()).hexdigest())
             self.assertEqual(verify(log, default_anchor(log))[1], len(events))
 
 

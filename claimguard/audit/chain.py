@@ -15,6 +15,11 @@ Rows use the same format and hash as src/audit.py, so the pack's own verifier
   - a count and head recorded outside this machine (--expect-count,
     --expect-head) detect a rewrite of the log and its anchor together, and
     are the only way to restore a lost anchor (--restore-anchor)
+  - each command's batch ends with one append_performed event: the command,
+    the OS user who ran it, the SHA-256 of the file it read and how many
+    events it appended. Reviewer names are self-declared; this records who
+    appended them. It is not authentication, and an OS user name written
+    here can never be erased
 
 Tamper-evident, not immutable: whoever controls both the log and the anchor
 can rewrite both, unless the head is also recorded somewhere they cannot
@@ -30,6 +35,7 @@ anchor, which verifies. A crash in the middle of the log write leaves a
 partial last line, which fails verification with no recovery: a known limit.
 """
 import argparse
+import getpass
 import hashlib
 import json
 import os
@@ -50,6 +56,7 @@ EVENT_FIELDS: Dict[str, Set[str]] = {
                      "injection_flags", "manifest_sha256"},
     "review_decision": {"claim_id", "rule_id", "action", "actor", "reason", "created_at", "original_status", "input_hash"},
     "version_created": {"claim_id", "version", "input_hash", "parent_hash", "actor", "reason", "changes"},
+    "append_performed": {"command", "os_user", "input_sha256", "events"},
 }
 
 
@@ -64,6 +71,20 @@ class MissingAnchor(AuditError):
 def digest(obj: Any) -> str:
     """Identical to src/audit.py's digest()."""
     return hashlib.sha256(json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+
+def file_sha256(path) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def os_user() -> str:
+    """The OS account running this process, or "unknown": getpass.getuser()
+    raises OSError from 3.13 (KeyError or ImportError before) when it finds
+    none, and that must not fail the append."""
+    try:
+        return getpass.getuser() or "unknown"
+    except (OSError, KeyError, ImportError):
+        return "unknown"
 
 
 def default_anchor(log) -> str:
@@ -202,12 +223,19 @@ def restore_anchor(log, anchor: str, expect: Tuple[int, str], *, trust_later: bo
     return hashes[-1], len(hashes)
 
 
-def append(log, events: Sequence[Mapping[str, Any]], anchor: Optional[str] = None) -> Tuple[str, int]:
+def append(log, events: Sequence[Mapping[str, Any]], anchor: Optional[str] = None, *,
+           performed: Optional[Tuple[str, str]] = None) -> Tuple[str, int]:
     """Append events after verifying the chain; update the anchor. All or nothing:
     every row is hashed and encoded before the first byte is written, so an
     event that cannot be recorded (text that is not valid Unicode, a value
     that is not JSON) refuses the whole batch with AuditError. A second
-    writer is refused: the writer lock is held from verify to anchor update."""
+    writer is refused: the writer lock is held from verify to anchor update.
+    performed = (command, SHA-256 of the file it read) ends the batch with one
+    append_performed event; an empty batch gets none."""
+    if performed and events:
+        command, input_sha256 = performed
+        events = [*events, {"event": "append_performed", "command": command, "os_user": os_user(),
+                            "input_sha256": input_sha256, "events": len(events)}]
     with writer_lock(log):
         head, count = verify(log, anchor)
         for event in events:

@@ -170,4 +170,5 @@ Roles 4 and 5 were committed from Mohammed Aziz Kadri's account (PRs #14 and #15
 | `docs/INTERFACE.md` | The review interface: pages, decisions, corrections, security |
 | `docs/ARCHITECTURE_DECISIONS.md` · `docs/DECISIONS.md` | Engineering decisions · rule clarifications and open mentor questions |
 | `docs/EVALUATION_REPORT.md` · `docs/PRIVACY_SECURITY.md` · `docs/AI_SCORECARD.md` | Phase 2 deliverables: test evaluation report · privacy and security note · explanation scorecard |
+| `docs/READINESS.md` | Readiness note: what is tested, only documented, or independently verified, and the known limits |
 | `CONTRIBUTING.md` | How the team works |

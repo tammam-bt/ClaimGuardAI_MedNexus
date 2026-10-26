@@ -425,7 +425,8 @@ const RUN_EVENT_TYPES = ["run_started", "run_finished", "ingestion_error", "inje
   "append_performed"];
 function canSeeEvent(e) { return !RUN_EVENT_TYPES.includes(e.event) || can("view_run_events"); }
 // The command that appended a batch, in words (claimguard/audit/chain.py).
-const APPENDED_BY = { "claimguard.run": "Run", "claimguard.ui.decisions": "Decisions", "claimguard.review.correct": "Correction" };
+const APPENDED_BY = { "claimguard.run": "Run", "claimguard.ui.decisions": "Decisions", "claimguard.ui.apply": "Decisions",
+  "claimguard.review.correct": "Correction" };
 function eventBadge(e) {
   const t = Core.EVENT[e.event] || { label: String(e.event), icon: "info", tone: "neutral" };
   return badge(t.label, { tone: t.tone, icon: t.icon });

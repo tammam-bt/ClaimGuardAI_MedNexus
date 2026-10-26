@@ -157,6 +157,20 @@ def judge(results_path, claims_path, log, directory: Mapping[str, str], *, ancho
     return rows
 
 
+def write_rows(path, rows) -> None:
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+
+
+def verdict(rows) -> str:
+    """One line: how many claims are ready, and why the others are blocked."""
+    blocked = Counter(r["state"] for r in rows if not r["ready"])
+    ready = len(rows) - sum(blocked.values())
+    detail = ", ".join(f"{n} {state}" for state, n in sorted(blocked.items()))
+    return f"{len(rows)} claims: {ready} ready, {sum(blocked.values())} blocked" + (f" ({detail})" if detail else "") + "."
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--results", required=True, help="the run's results")
@@ -179,16 +193,11 @@ def main(argv=None) -> int:
             print(chain.RESTORE_HINT)
         return 2
     if a.output:
-        out = Path(a.output)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
-    blocked = Counter(r["state"] for r in rows if not r["ready"])
-    ready = len(rows) - sum(blocked.values())
-    detail = ", ".join(f"{n} {state}" for state, n in sorted(blocked.items()))
-    print(f"{len(rows)} claims: {ready} ready, {sum(blocked.values())} blocked" + (f" ({detail})" if detail else "") + ".")
+        write_rows(a.output, rows)
+    print(verdict(rows))
     if count:
         print(chain.record_hint(count, head))
-    return 1 if blocked else 0
+    return 1 if any(not r["ready"] for r in rows) else 0
 
 
 if __name__ == "__main__":

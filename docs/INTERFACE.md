@@ -52,6 +52,20 @@ The page speaks a claims reviewer's language: it shows no command, file path of 
    Every decision is checked first: the event format, the role (`claimguard.guards.rbac`), the date, that it was taken on this version of the claim, on a finding of this run, at its current status. One bad decision writes nothing. Appending the same file twice adds nothing. `--directory` is required: it maps each name to a role, in the format of `actors.example.json`. A name that is not in it records nothing, and neither does a role that is not `reviewer` or `admin`. The command ends by printing the log's count and head: record them outside this machine (see *The gate*).
 4. Rebuild the page: the decisions now count in every stage, counter and history.
 
+**In one step.** `python -m claimguard.ui.apply` appends, runs the gate and rebuilds the page, with the same checks and the same result as `decisions`, `gate` and `claimguard.ui` run in order:
+
+```bash
+python -m claimguard.ui.apply --decisions review_decisions_<run>.jsonl --log outputs/audit.jsonl \
+    --directory actors.json --results outputs/dev_predictions.jsonl --claims data/development/claims.jsonl \
+    [--corrections outputs/corrections] [--gold data/development/expected_results.jsonl] \
+    [--expect-count N --expect-head HASH]
+```
+
+- With `--expect-count` and `--expect-head`, the log is checked against the head recorded outside this machine before anything is appended.
+- It prints how many decisions were appended, the gate's verdict and the page's path, and ends with the count and head to record outside.
+- Exit 0 when every claim is ready, 1 while any is blocked, as the gate does. 2 when it stopped without rebuilding the page: a decision was refused (nothing is appended), or the chain or the run's files cannot be trusted.
+- The audit log's `append_performed` event names `claimguard.ui.apply` as the command.
+
 A finding is settled only by **Dismiss with reason**. A check that did not run can never be dismissed.
 
 ## Corrections
@@ -130,6 +144,7 @@ The Node and Chrome tests are skipped where Node or Chrome is not installed.
 | `claimguard/ui/bundle.py` | gathers the run's files, computes routes, verifies the chain, scores against the gold |
 | `claimguard/ui/page.py` | inlines CSS, icons, data and scripts into one HTML file |
 | `claimguard/ui/decisions.py` | appends downloaded decisions to the chain, after checking them |
+| `claimguard/ui/apply.py` | one step: `decisions`, then the gate, then the page rebuilt |
 | `claimguard/review/correct.py` | correction → new version → recheck → `version_created` |
 | `claimguard/review/gate.py` | the gate: ready or blocked per claim, exit code; `outcome()` is the twin of `Core.outcome` |
 | `claimguard/review/feedback.py` | decisions summarized from the audit chain |

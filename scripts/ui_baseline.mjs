@@ -22,7 +22,9 @@ const MAX_SHOT_HEIGHT = 6000;  // the claims list is very tall; the top is enoug
 mkdirSync(join(outDir, "screens"), { recursive: true });
 
 const profile = mkdtempSync(join(tmpdir(), "cg-baseline-"));
-const chrome = spawn(chromePath, ["--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
+// Chrome drops hash changes past about 200 in 10 s ("throttling navigation"),
+// and the route timing below makes about as many: switch that guard off.
+const chrome = spawn(chromePath, ["--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check", "--disable-ipc-flooding-protection",
   "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--window-size=1440,900", "about:blank"]);
 const wsUrl = await new Promise((resolve, reject) => {
   let buf = "";
@@ -89,9 +91,11 @@ async function open(hash) {
 async function goTo(route) {
   return evaluate(`new Promise((resolve, reject) => {
     if (location.hash === ${JSON.stringify("#/" + route)}) { resolve({ drawn: 0, painted: 0 }); return; }
-    setTimeout(() => reject(new Error('no hashchange')), 30000);
+    let fired = false;
+    setTimeout(() => reject(new Error(fired ? 'no frame after the page change' : 'no hashchange')), 30000);
     const t0 = performance.now();
     addEventListener('hashchange', () => {
+      fired = true;
       const drawn = performance.now() - t0;
       requestAnimationFrame(() => setTimeout(() => resolve({ drawn, painted: performance.now() - t0 }), 0));
     }, { once: true });

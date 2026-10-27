@@ -24,6 +24,27 @@ def js_sources():
     return {name: (STATIC / name).read_text(encoding="utf-8") for name in JS_FILES}
 
 
+def css_rules():
+    """(selector, declarations) of every innermost rule of app.css, so a
+    rule inside @media is read like any other."""
+    css = re.sub(r"/\*.*?\*/", "", (STATIC / "app.css").read_text(encoding="utf-8"), flags=re.S)
+    rules, stack, start = [], [], 0
+    for i, ch in enumerate(css):
+        if ch == "{":
+            if stack:
+                stack[-1][2] = True  # it holds rules, not declarations
+            stack.append([css[start:i].strip(), i + 1, False])
+            start = i + 1
+        elif ch == "}":
+            selector, body_start, nested = stack.pop()
+            if not nested:
+                rules.append((selector, css[body_start:i]))
+            start = i + 1
+        elif ch == ";" and not stack:
+            start = i + 1
+    return rules
+
+
 def sprite_ids():
     return set(re.findall(r'<symbol id="i-([a-z0-9-]+)"', (STATIC / "icons.svg").read_text(encoding="utf-8")))
 
@@ -89,9 +110,36 @@ class ConsistencyTests(unittest.TestCase):
             self.assertIsNone(banned.search(text), name)
 
     def test_colors_live_only_in_the_tokens(self):
+        rules = css_rules()
+        self.assertEqual([s for s, _ in rules if s.startswith(":root")],
+                         [":root", ':root,\n:root[data-theme="light"]', ':root:not([data-theme="light"])', ':root[data-theme="dark"]'])
+        for selector, body in rules:
+            if not selector.startswith(":root"):
+                self.assertEqual(re.findall(r"#[0-9A-Fa-f]{3,8}\b|rgba?\(|hsla?\(", body), [], selector)
+
+    def test_type_layers_and_motion_come_from_tokens(self):
+        # System fonts differ by OS, so the scale must hold wherever the face
+        # changes: every size, weight, line height and family is a token.
+        allowed = {"font-family": r"var\(--font-(sans|mono)\)|inherit",
+                   "font-size": r"var\(--(text-[a-z0-9]+|font-mono-scale)\)",
+                   "font-weight": r"var\(--weight-[a-z]+\)",
+                   "line-height": r"var\(--leading-[a-z]+\)",
+                   "z-index": r"var\(--z-[a-z]+\)",
+                   "transition-duration": r"0\.01ms !important"}
+        for selector, body in css_rules():
+            if selector.startswith(":root"):
+                continue
+            for prop, value in re.findall(r"(?<![a-z-])(font-family|font-size|font-weight|line-height|z-index|transition-duration)\s*:\s*([^;]+)", body):
+                self.assertRegex(value.strip(), rf"^({allowed[prop]})$", f"{selector} {{ {prop}: {value} }}")
+            for value in re.findall(r"(?<![a-z-])transition\s*:\s*([^;]+)", body):
+                self.assertNotRegex(value, r"\d+m?s", f"{selector}: a duration that is not a token")
+
+    def test_media_queries_use_the_breakpoint_tokens(self):
         css = (STATIC / "app.css").read_text(encoding="utf-8")
-        root_end = css.index("}", css.index(":root"))
-        self.assertEqual(re.findall(r"#[0-9A-Fa-f]{3,8}\b|rgba?\(", css[root_end:]), [])
+        breakpoints = set(re.findall(r"--bp-[a-z]+:\s*(\d+px);", css))
+        widths = re.findall(r"@media \([a-z-]*width:\s*(\d+px)\)", css)
+        self.assertTrue(widths)
+        self.assertLessEqual(set(widths), breakpoints)
 
     def test_no_external_resource(self):
         # The page must open offline: no CDN script, stylesheet or font.

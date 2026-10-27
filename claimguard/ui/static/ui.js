@@ -24,8 +24,9 @@ const Store = {
     try { const v = localStorage.getItem(`claimguard.${key}`); return v === null ? fallback : JSON.parse(v); }
     catch (e) { return fallback; }
   },
+  // True when the browser stored it (false: storage full, blocked or absent).
   set(key, value) {
-    try { localStorage.setItem(`claimguard.${key}`, JSON.stringify(value)); } catch (e) { /* unavailable */ }
+    try { localStorage.setItem(`claimguard.${key}`, JSON.stringify(value)); return true; } catch (e) { return false; }
   },
 };
 
@@ -35,12 +36,14 @@ const State = {
   theme: (() => { const t = Store.get("theme", "system"); return t === "light" || t === "dark" ? t : "system"; })(),
   drafts: (() => { const d = Store.get(`drafts.${RUN_ID}`, []); return Array.isArray(d) ? d : []; })(),
   listeners: [],
+  // Returns false when the drafts could not be stored in this browser.
   save() {
     Store.set("role", this.role);
     Store.set("reviewer", this.reviewer);
     Store.set("theme", this.theme);
-    Store.set(`drafts.${RUN_ID}`, this.drafts);
+    const stored = Store.set(`drafts.${RUN_ID}`, this.drafts);
     this.listeners.forEach((fn) => fn());
+    return stored;
   },
   onChange(fn) { this.listeners.push(fn); },
 };
@@ -354,7 +357,7 @@ function checkGrid(results, opts) {
 // claim names lines and documents by their own IDs), and its value as plain
 // text. A list or an object is source text: it stays boxed as data.
 function evidenceTable(evidence, claim) {
-  return h("table", { class: "evidence" },
+  return h("table", { class: "evidence", "aria-label": "Evidence the engine cited" },
     h("thead", {}, h("tr", {}, h("th", { scope: "col", text: "Field" }), h("th", { scope: "col", text: "Value" }))),
     h("tbody", {}, evidence.map((e) => h("tr", {}, h("td", { text: Core.fieldLabel(e.path, claim) }),
       h("td", {}, e.value !== null && typeof e.value === "object"
@@ -442,26 +445,59 @@ function findingBlock(opts) {
 }
 
 // The reviewer's decision on one finding: the four actions, a reason
-// (required), and Save. It holds no state of its own: the caller passes the
-// state and redraws on each callback. opts: { id, action, reason, reviewer,
-// allowed(action), notImplemented, draft, recorded, error, onAction,
-// onReason, onName, onSave, onDiscard }. Your name comes just before Save
-// when it is missing, so the keyboard meets it on the way.
+// (required), and Save. It updates itself as the reviewer works, so focus
+// never jumps; the caller hears each change and redraws only after a save.
+// opts: { id, action, reason, reviewer, allowed(action), notImplemented,
+// draft, recorded, error, confirming, onAction, onReason, onName,
+// onSave({ action, reason }), onDiscard }. Your name comes just before Save
+// when it is missing, so the keyboard meets it on the way. Dismiss settles
+// a finding, so it asks once more before saving.
 function decisionPanel(opts) {
   const o = opts;
+  const st = { action: o.action || null, reason: o.reason || "", name: String(o.reviewer || ""), confirming: !!o.confirming };
   const reasonId = `reason-${o.id}`, hintId = `reason-hint-${o.id}`;
-  const named = String(o.reviewer || "").trim() !== "";
-  const ready = !!o.action && String(o.reason || "").trim() !== "" && named && o.allowed(o.action);
-  const reason = h("textarea", { id: reasonId, class: `textarea${o.error ? " textarea--invalid" : ""}`, rows: "3",
+  const ready = () => !!st.action && st.reason.trim() !== "" && st.name.trim() !== "" && o.allowed(st.action);
+  const settles = () => st.action === "dismiss_with_reason";
+
+  const actions = Core.ACTION_ORDER.map((a) => button({ label: Core.ACTION[a].label, icon: Core.ACTION[a].icon, title: Core.ACTION[a].help,
+    pressed: st.action === a, disabled: !o.allowed(a) || (o.notImplemented && a === "dismiss_with_reason"),
+    onClick: () => { st.action = st.action === a ? null : a; st.confirming = false; if (o.onAction) o.onAction(st.action); update(); } }));
+  const help = h("p", { class: "muted small" });
+  const reason = h("textarea", { id: reasonId, class: `textarea${o.error ? " textarea--invalid" : ""}`, rows: "2",
     placeholder: "Why? Kept with your name in this browser's draft.", "aria-describedby": hintId, required: true,
-    onInput: (e) => o.onReason(e.target.value) });
-  reason.value = o.reason || "";
-  const nameField = named || !o.onName ? null : (() => {
+    onInput: (e) => { st.reason = e.target.value; if (o.onReason) o.onReason(st.reason); update(); } });
+  reason.value = st.reason;
+  const nameField = st.name.trim() || !o.onName ? null : (() => {
     const input = h("input", { id: `name-${o.id}`, class: "input", autocomplete: "name", placeholder: "e.g. Reviewer 01",
-      onInput: (e) => o.onName(e.target.value) });
+      onInput: (e) => { st.name = e.target.value; o.onName(st.name); update(); } });
     return h("label", { class: "field", for: `name-${o.id}` }, "Your name (needed to save)", input);
   })();
-  return h("div", { class: "decision-panel" },
+
+  const save = button({ label: o.draft ? "Replace the draft" : "Save draft", variant: "primary", onClick: () => {
+    if (!ready()) return;
+    if (settles() && !st.confirming) { st.confirming = true; update(); yes.focus(); return; }
+    o.onSave({ action: st.action, reason: st.reason });
+  } });
+  const why = h("span", { class: "muted small" });
+  const saveRow = h("div", { class: "row decision-panel__save" }, nameField, save, why);
+  const yes = button({ label: "Yes, dismiss", variant: "primary", icon: "ban", onClick: () => { if (ready()) o.onSave({ action: st.action, reason: st.reason }); } });
+  const back = button({ label: "Go back", variant: "ghost", onClick: () => { st.confirming = false; update(); save.focus(); } });
+  const confirm = callout({ tone: "unknown", icon: "ban", role: "group", title: "Dismiss settles this finding",
+    text: "If every finding of the claim is settled, it becomes ready for submission. It stays a draft until an administrator appends it.",
+    body: h("div", { class: "row" }, yes, back) });
+
+  function update() {
+    actions.forEach((b, i) => b.setAttribute("aria-pressed", String(st.action === Core.ACTION_ORDER[i])));
+    help.textContent = st.action ? Core.ACTION[st.action].help : "";
+    help.hidden = !st.action;
+    save.disabled = !ready();
+    why.textContent = !st.action ? "Choose an action first." : !st.reason.trim() ? "Write the reason first."
+      : !st.name.trim() ? "Enter your name first." : "";
+    confirm.hidden = !st.confirming;
+    saveRow.hidden = st.confirming;
+  }
+
+  const panel = h("div", { class: "decision-panel" },
     o.recorded ? callout({ tone: "info", icon: "history", title: "In the audit log",
       text: `${Core.ACTION[o.recorded.action].label} by ${o.recorded.actor}, ${Core.datetime(o.recorded.created_at)}: ${o.recorded.reason}` }) : null,
     o.draft ? callout({ tone: "pass", icon: Core.ACTION[o.draft.action].icon, title: "Draft saved in this browser, not yet in the audit log",
@@ -469,18 +505,14 @@ function decisionPanel(opts) {
       body: o.onDiscard ? h("div", { class: "row" }, button({ label: "Discard this draft", variant: "ghost", icon: "ban", onClick: o.onDiscard })) : null }) : null,
     o.notImplemented ? callout({ tone: "neutral", icon: "circle-dashed", title: "This check did not run",
       text: "It cannot be dismissed (routing policy): only an implementation can settle it." }) : null,
-    h("div", { class: "row row--tight", role: "group", "aria-label": "Review action" },
-      Core.ACTION_ORDER.map((a) => button({ label: Core.ACTION[a].label, icon: Core.ACTION[a].icon, title: Core.ACTION[a].help,
-        pressed: o.action === a, disabled: !o.allowed(a) || (o.notImplemented && a === "dismiss_with_reason"),
-        onClick: () => o.onAction(o.action === a ? null : a) }))),
-    o.action ? h("p", { class: "muted small", text: Core.ACTION[o.action].help }) : null,
-    h("label", { class: "field", for: reasonId }, "Reason (required)", reason),
-    h("p", { id: hintId, class: "muted small", text: "Saved as a draft in this browser. An administrator adds drafts to the audit log." }),
-    o.error ? callout({ tone: "fail", icon: "alert-triangle", role: "alert", title: "Not saved", text: `${o.error} Your reason is kept above.` }) : null,
-    nameField,
-    h("div", { class: "row" },
-      button({ label: o.draft ? "Replace the draft" : "Save draft", variant: "primary", disabled: !ready, onClick: () => { if (ready) o.onSave(); } }),
-      !o.action ? h("span", { class: "muted small", text: "Choose an action first." }) : null));
+    h("div", { class: "decision-panel__actions", role: "group", "aria-label": "Review action" }, actions),
+    help,
+    h("label", { class: "field", for: reasonId }, h("span", {}, "Reason (required) ",
+      h("span", { id: hintId, class: "muted", text: "· saved as a draft in this browser; an administrator adds drafts to the audit log" })), reason),
+    o.error ? callout({ tone: "fail", icon: "alert-triangle", role: "alert", title: "Not stored", text: o.error }) : null,
+    saveRow, confirm);
+  update();
+  return panel;
 }
 
 // A claim's history, oldest first. A logged event (in the audit chain) and
@@ -595,13 +627,24 @@ function recordedFor(entry, ruleId) {
   const mine = RECORDED.filter((e) => sameFinding(e, entry.route.claim_id, ruleId, Core.current(entry).input_hash));
   return mine.length ? mine[mine.length - 1] : null;
 }
+// False when this browser would not store it: it is then kept on this page
+// only, until a reload, and the caller says so.
 function saveDraft(event) {
   State.drafts = State.drafts.filter((d) => !sameFinding(d, event.claim_id, event.rule_id, event.input_hash)).concat([event]);
-  State.save();
+  return State.save();
 }
 function discardDraft(entry, ruleId) {
   State.drafts = State.drafts.filter((d) => !sameFinding(d, entry.route.claim_id, ruleId, Core.current(entry).input_hash));
   State.save();
+}
+// Drafts in this browser, never presented as logged (M6). Downloading them
+// is an export, so it is a secondary action here.
+function draftsBanner() {
+  const n = State.drafts.length;
+  if (!n) return null;
+  return callout({ tone: "info", icon: "user", title: `${Core.plural(n, "draft")} in this browser`,
+    text: "Not in the audit log until an administrator appends them.",
+    body: h("div", { class: "row" }, button({ label: `Download decisions (${n})`, icon: "download", onClick: downloadDecisions })) });
 }
 function downloadDecisions() {
   download(`review_decisions_${RUN_ID.slice(0, 8)}.jsonl`, State.drafts.map((d) => JSON.stringify(d)).join("\n") + "\n");

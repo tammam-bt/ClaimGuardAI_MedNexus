@@ -118,7 +118,21 @@ const ClaimViews = (function () {
 
 
 // ------------------------------------------------------------------ detail
+// One claim as a review workspace. A header (ID, route, outcome, total,
+// dates, the check fingerprint), then three panes on wide screens: the
+// findings, the finding being decided (in three layers), and the claim's
+// data, where "show in claim" highlights each field a finding cites (the
+// evidence thread). The rest of the claim follows below: life cycle, all 15
+// checks, history and the envelope as received.
 const ClaimDetail = (function () {
+  const SEVERITY_RANK = { high: 0, medium: 1, low: 2 };
+  const STATUS_RANK = { FAIL: 0, NOT_IMPLEMENTED: 1, UNABLE_TO_ASSESS: 2 };
+  const DECISION_STATE = { open: "Undecided", draft: "Draft", logged: "In the audit log" };
+  // j/k move between findings wherever the open workspace has the page; one
+  // listener for the page's life, pointed at the workspace on screen.
+  let keyHandler = null;
+  document.addEventListener("keydown", (e) => { if (keyHandler) keyHandler(e); });
+
   function section(id, node) { node.id = id; return node; }
 
   // Where a finding's explanation came from. The mock is not a model: its
@@ -131,106 +145,32 @@ const ClaimDetail = (function () {
       String(ex.explanation).trim() === String(result.explanation || "").trim();
     return { kind, record: ex, own };
   }
-  function explanationLabel(x) {
+
+  // Layer 2: the rule's text or the AI's, labelled; a rejected AI answer
+  // and a withheld claim say why in plain words, not in a tooltip.
+  function explanationLayer(entry, r) {
+    const x = explanationOf(entry, r);
     const s = Core.SOURCE[x.kind] || Core.SOURCE.mock;
     const why = x.kind === "fallback" && x.record && x.record.failure
-      ? `The AI answer was rejected: ${(Core.FAILURE[x.record.failure.reason] || x.record.failure.reason).toLowerCase()}.`
+      ? `The AI answer was rejected: ${(Core.FAILURE[x.record.failure.reason] || x.record.failure.reason).toLowerCase()}. The rule's own explanation is shown instead.`
       : x.kind === "skipped_flagged" ? "This claim was flagged for injection, so its findings were never sent to the model." : null;
-    return badge(s.label, { tone: s.tone, icon: s.icon, title: why });
-  }
-
-  // One finding: what the engine found, why, and the reviewer's decision.
-  function findingCard(entry, finding, onDecided, nameWatchers) {
-    const r = finding.result;
     const rule = RULE_BY_ID.get(r.rule_id);
-    const s = Core.STATUS[r.status];
-    const box = h("article", { class: `finding is-${s.tone}`, id: `finding-${r.rule_id}`, "aria-label": `${r.rule_id} ${rule.title}` });
-    const draft0 = draftFor(entry, r.rule_id);
-    const pending = { action: draft0 ? draft0.action : null, reason: draft0 ? draft0.reason : "" };
-    let saveButton = null;
-
-    function canSave() {
-      return !!pending.action && pending.reason.trim() !== "" && State.reviewer.trim() !== "" && can(pending.action);
-    }
-    function updateSave() { if (saveButton) saveButton.disabled = !canSave(); }
-    nameWatchers.push(updateSave);
-
-    function decisionArea() {
-      const draft = draftFor(entry, r.rule_id);
-      const recorded = recordedFor(entry, r.rule_id);
-      const area = h("div", { class: "decision" }, h("span", { class: "label", text: "Your decision" }));
-      if (recorded) {
-        area.appendChild(callout({ tone: "info", icon: "history", title: "In the audit log",
-          text: `${Core.ACTION[recorded.action].label} by ${recorded.actor}, ${Core.datetime(recorded.created_at)}: ${recorded.reason}` }));
-      }
-      if (draft) {
-        area.appendChild(callout({ tone: "pass", icon: Core.ACTION[draft.action].icon, title: "Saved in this browser, not yet in the audit log",
-          text: `${Core.ACTION[draft.action].label} by ${draft.actor}: ${draft.reason}`,
-          body: h("div", { class: "row", style: { marginTop: "8px" } },
-            button({ label: "Discard this draft", variant: "ghost", icon: "ban",
-              onClick: () => { discardDraft(entry, r.rule_id); pending.action = null; pending.reason = ""; onDecided(); draw(); } })) }));
-      }
-      const notImplemented = r.status === "NOT_IMPLEMENTED";
-      if (notImplemented) {
-        area.appendChild(callout({ tone: "neutral", icon: "circle-dashed", title: "This check did not run",
-          text: "It cannot be dismissed (routing policy): only an implementation can settle it." }));
-      }
-      area.appendChild(h("div", { class: "row", role: "group", "aria-label": "Review action" },
-        Core.ACTION_ORDER.map((a) => button({
-          label: Core.ACTION[a].label, icon: Core.ACTION[a].icon, title: Core.ACTION[a].help,
-          pressed: pending.action === a,
-          disabled: !can(a) || (notImplemented && a === "dismiss_with_reason"),
-          onClick: () => { pending.action = pending.action === a ? null : a; draw(); },
-        }))));
-      if (pending.action) area.appendChild(h("p", { class: "muted small", text: Core.ACTION[pending.action].help }));
-      const reasonId = `reason-${r.rule_id}`;
-      const textarea = h("textarea", { id: reasonId, class: "textarea", rows: "3",
-        placeholder: "Why? Recorded with your name in the audit log.",
-        onInput: (e) => { pending.reason = e.target.value; updateSave(); } });
-      textarea.value = pending.reason;
-      area.appendChild(h("label", { class: "field", for: reasonId }, "Reason (required for every decision)", textarea));
-      saveButton = button({ label: draft ? "Replace the saved decision" : "Save decision", variant: "primary",
-        onClick: () => {
-          if (!canSave()) return;
-          saveDraft(Core.decisionEvent(entry, r, pending.action, State.reviewer, pending.reason, new Date().toISOString()));
-          onDecided();
-          draw();
-        } });
-      saveButton.disabled = !canSave();
-      area.appendChild(h("div", { class: "row" }, saveButton,
-        State.reviewer.trim() ? null : h("span", { class: "muted small", text: "Enter your name in “Your decisions” first." })));
-      return area;
-    }
-
-    function draw() {
-      const ex = explanationOf(entry, r);
-      box.replaceChildren(
-        h("div", { class: "finding__head" },
-          h("span", { class: "mono", text: r.rule_id }), h("span", { class: "finding__title", text: rule.title }),
-          statusBadge(r.status), severityBadge(r.severity, { long: true }),
-          r.affected_line_ids.length ? badge(`Line ${r.affected_line_ids.join(", ")}`, { tone: "neutral" }) : null),
-        h("div", { class: "finding__body" },
-          h("div", { class: "finding__section" },
-            h("div", { class: "row row--tight" }, h("span", { class: "label", text: "What the engine found" }), ex.own ? explanationLabel(ex) : null),
-            h("p", { text: r.explanation })),
-          ex.own ? null : h("div", { class: "finding__section" },
-            h("div", { class: "row row--tight" }, h("span", { class: "label", text: "Explanation for the reviewer" }), explanationLabel(ex)),
-            h("div", { class: "explanation stack" }, h("p", { text: ex.record.explanation }),
-              h("p", { class: "muted small", text: "Written by an AI model and checked before it is shown. It cannot change the result." }))),
-          h("div", { class: "finding__section" }, h("span", { class: "label", text: "Evidence the engine cited" }), evidenceTable(r.evidence, entry.claim)),
-          r.corrective_action ? h("div", { class: "finding__section" }, h("span", { class: "label", text: "Corrective action" }), h("p", { text: r.corrective_action })) : null,
-          h("details", { class: "disclosure" }, h("summary", { text: "Rule logic (rulebook)" }),
-            h("p", { class: "small", text: rule.logic })),
-          decisionArea()));
-    }
-    draw();
-    return box;
+    return h("div", { class: "stack stack--tight" },
+      x.own
+        ? [h("div", { class: "row row--tight" }, badge(s.label, { tone: s.tone, icon: s.icon })), h("p", { text: r.explanation })]
+        : [h("p", { text: r.explanation }),
+          h("div", { class: "explanation stack stack--tight" }, h("div", { class: "row row--tight" }, badge(s.label, { tone: s.tone, icon: s.icon })),
+            h("p", { text: x.record.explanation }),
+            h("p", { class: "muted small", text: "Written by an AI model and checked before it is shown. It cannot change the result." }))],
+      why ? h("p", { class: "muted small", text: why }) : null,
+      r.corrective_action ? h("p", { class: "small" }, h("span", { class: "label", text: "Corrective action: " }), r.corrective_action) : null,
+      h("details", { class: "disclosure" }, h("summary", { text: "Rule logic (rulebook)" }), h("p", { class: "small", text: rule.logic })));
   }
 
   // Why a finding needs a human (routing triggers), in the challenge's words.
   const TRIGGER_LABEL = { low_confidence: "low confidence", high_severity: "high severity", issue: "proven issue" };
 
-  function routeCallout(entry) {
+  function routeCallout(entry, onPick) {
     const route = entry.route;
     if (!route.reasons.length) {
       return callout({ tone: "pass", icon: Core.ROUTE.CLEAR.icon, title: "Clear: nothing to decide",
@@ -239,9 +179,9 @@ const ClaimDetail = (function () {
     return callout({ tone: route.route === "ESCALATE" ? "fail" : "unknown", icon: Core.ROUTE[route.route].icon,
       title: `Why ${Core.ROUTE[route.route].label.toLowerCase()}`,
       text: Core.ROUTE[route.route].help,
-      body: h("div", { class: "row", style: { marginTop: "8px" } }, route.reasons.map((x) =>
-        h("a", { href: `#finding-${x.rule_id}`, class: "badge tone-neutral", style: { textDecoration: "none" },
-          onClick: (ev) => { ev.preventDefault(); scrollToId(`finding-${x.rule_id}`); } },
+      body: h("div", { class: "row row--tight" }, route.reasons.map((x) =>
+        h("a", { href: href("claims", route.claim_id, { finding: x.rule_id }), class: "badge tone-neutral",
+          onClick: (ev) => { ev.preventDefault(); onPick(x.rule_id); } },
         `${x.rule_id} · ${Core.STATUS[x.status].label} · ` +
         ((x.triggers || []).map((t) => TRIGGER_LABEL[t] || t).join(", ") || x.severity)))) });
   }
@@ -250,14 +190,14 @@ const ClaimDetail = (function () {
     if (!entry.flag) return null;
     return callout({ tone: "unknown", icon: "shield-alert", title: "Flagged by the injection pre-filter",
       text: "Instruction-like text was found in this claim. All 15 rules still ran on it, and its findings were not sent to the model. The text is shown below as data only.",
-      body: h("ul", { class: "small", style: { margin: "8px 0 0", paddingLeft: "18px" } }, entry.flag.hits.map((hit) =>
+      body: h("ul", { class: "small plain-list" }, entry.flag.hits.map((hit) =>
         h("li", {}, hit.path === "(joined)" ? "Text across several fields" : Core.fieldLabel(hit.path, entry.claim),
           ` · ${Core.FAMILY[hit.family] || hit.family} · found in: ${hit.layer}`))) });
   }
 
   function scrollToId(id) {
     const el = document.getElementById(id);
-    if (el) { el.scrollIntoView({ behavior: "smooth", block: "start" }); el.focus && el.setAttribute("tabindex", "-1"); }
+    if (el) { el.setAttribute("tabindex", "-1"); el.scrollIntoView({ behavior: "smooth", block: "start" }); el.focus({ preventScroll: true }); }
   }
 
   function resultPanel(entry, r) {
@@ -269,72 +209,264 @@ const ClaimDetail = (function () {
       h("span", { class: "label", text: "Rule logic (rulebook)" }), h("p", { class: "small", text: rule.logic })));
   }
 
-  function linesTable(c) {
-    return table({ caption: "Service lines", rows: c.lines, columns: [
-      { key: "line_id", label: "Line", render: (l) => h("span", { class: "mono", text: l.line_id }) },
-      { key: "service_code", label: "Service", render: (l) => h("span", { class: "mono" }, value(l.service_code)) },
-      { key: "service_date", label: "Date", render: (l) => (l.service_date ? Core.date(l.service_date) : value(null)) },
-      { key: "modifier", label: "Modifier", render: (l) => value(l.modifier) },
-      { key: "quantity", label: "Qty", num: true, render: (l) => value(l.quantity) },
-      { key: "unit_price", label: "Unit price", num: true, render: (l) => (typeof l.unit_price === "number" ? Core.money(l.unit_price) : value(l.unit_price)) },
-      { key: "net_amount", label: "Net", num: true, render: (l) => (typeof l.net_amount === "number" ? Core.money(l.net_amount) : value(l.net_amount)) },
-      { key: "authorization_id", label: "Authorization", render: (l) => h("span", { class: "mono" }, value(l.authorization_id)) },
-    ] });
+  // ---------------------------------------------------------- claim pane
+  // Every value carries its JSON pointer (data-path), the same pointer the
+  // engine cites as evidence, so a finding can point at it.
+  const mono = (v) => h("span", { class: "mono" }, value(v));
+  const money = (v, cur) => (typeof v === "number" ? h("span", { class: "num", text: Core.money(v, cur) }) : value(v));
+  const day = (v) => (v ? Core.date(v) : value(null));
+  function fields(pairs) {
+    return h("dl", { class: "kv" }, pairs.filter(Boolean).map(([k, path, v]) =>
+      [h("dt", { text: k }), h("dd", { "data-path": path }, v)]));
   }
-
-  function authorizationsBlock(c) {
-    if (!c.authorizations.length) return h("p", { class: "muted small", text: "No authorization supplied (an empty inventory, not an unknown)." });
-    return table({ caption: "Authorizations", rows: c.authorizations, columns: [
-      { key: "authorization_id", label: "Authorization", render: (a) => h("span", { class: "mono", text: a.authorization_id }) },
-      { key: "status", label: "Status", render: (a) => value(a.status) },
-      { key: "service_code", label: "Service", render: (a) => h("span", { class: "mono" }, value(a.service_code)) },
-      { key: "patient_id", label: "Patient", render: (a) => h("span", { class: "mono" }, value(a.patient_id)) },
-      { key: "valid", label: "Valid", render: (a) => `${a.valid_from ? Core.date(a.valid_from) : "—"} – ${a.valid_to ? Core.date(a.valid_to) : "—"}` },
-      { key: "max_quantity", label: "Max qty", num: true, render: (a) => value(a.max_quantity) },
-    ] });
+  function block(path, title, body) {
+    return h("div", { class: "claim-block", "data-path": path }, h("p", { class: "label", text: title }), body);
+  }
+  function claimPane(entry) {
+    const c = Core.current(entry).claim;
+    const cv = c.coverage;
+    const policyKnown = Object.prototype.hasOwnProperty.call(DATA.policies, c.policy_id);
+    const lines = c.lines.map((l, i) => block(`/lines/${i}`, `Line ${l.line_id}`, fields([
+      ["Service", `/lines/${i}/service_code`, mono(l.service_code)],
+      ["Date", `/lines/${i}/service_date`, day(l.service_date)],
+      l.modifier !== undefined ? ["Modifier", `/lines/${i}/modifier`, value(l.modifier)] : null,
+      ["Quantity", `/lines/${i}/quantity`, h("span", { class: "num" }, value(l.quantity))],
+      ["Unit price", `/lines/${i}/unit_price`, money(l.unit_price)],
+      ["Net", `/lines/${i}/net_amount`, money(l.net_amount)],
+      ["Authorization", `/lines/${i}/authorization_id`, mono(l.authorization_id)],
+    ])));
+    const auths = c.authorizations.map((a, i) => block(`/authorizations/${i}`, `Authorization ${a.authorization_id}`, fields([
+      ["Status", `/authorizations/${i}/status`, value(a.status)],
+      ["Service", `/authorizations/${i}/service_code`, mono(a.service_code)],
+      ["Patient", `/authorizations/${i}/patient_id`, mono(a.patient_id)],
+      ["Valid from", `/authorizations/${i}/valid_from`, day(a.valid_from)],
+      ["Valid to", `/authorizations/${i}/valid_to`, day(a.valid_to)],
+      ["Max quantity", `/authorizations/${i}/max_quantity`, h("span", { class: "num" }, value(a.max_quantity))],
+    ])));
+    return h("div", { class: "stack" },
+      card({ title: "Claim", body: fields([
+        ["Patient", "/patient_id", mono(c.patient_id)], ["Member", "/member_id", mono(c.member_id)],
+        ["Provider", "/provider_id", mono(c.provider_id)], ["Payer", "/payer_id", mono(c.payer_id)],
+        ["Policy", "/policy_id", h("span", { class: "row row--tight" }, mono(c.policy_id),
+          policyKnown ? null : badge("No matching policy supplied", { tone: "unknown", icon: "help-circle" }))],
+        ["Invoice", "/invoice_number", mono(c.invoice_number)], ["Diagnosis", "/diagnosis_code", mono(c.diagnosis_code)],
+        ["Submitted", "/submission_date", day(c.submission_date)],
+        ["Total", "/total_amount", money(c.total_amount)], ["Currency", "/currency", mono(c.currency)],
+      ]) }),
+      card({ title: "Coverage", body: fields([
+        ["Coverage", "/coverage/coverage_id", mono(cv.coverage_id)], ["Status", "/coverage/status", value(cv.status)],
+        ["Beneficiary", "/coverage/beneficiary_patient_id", mono(cv.beneficiary_patient_id)], ["Member", "/coverage/member_id", mono(cv.member_id)],
+        ["Start", "/coverage/start_date", day(cv.start_date)], ["End", "/coverage/end_date", day(cv.end_date)],
+      ]) }),
+      card({ title: `Service lines (${c.lines.length})`, body: h("div", { class: "stack", "data-path": "/lines" }, lines) }),
+      card({ title: "Authorizations", body: h("div", { class: "stack", "data-path": "/authorizations" }, auths.length ? auths
+        : h("p", { class: "muted small", text: "No authorization supplied (an empty inventory, not an unknown)." })) }),
+      card({ title: "Documents", body: h("div", { "data-path": "/attachments" }, attachmentsBlock(entry)) }));
   }
 
   function attachmentsBlock(entry) {
-    const c = entry.claim;
+    const c = Core.current(entry).claim;
     if (!c.attachments.length) return h("p", { class: "muted small", text: "No document supplied (an empty inventory, not an unknown)." });
     return h("div", { class: "stack" }, c.attachments.map((a, i) => {
       const flaggedHere = entry.flag && entry.flag.hits.some((hit) => hit.path.startsWith(`/attachments/${i}/`));
-      return h("div", { class: "stack" },
-        kv([["Document", h("span", { class: "mono", text: a.attachment_id })], ["Type", a.type], ["Status", a.document_status],
-          ["Patient", h("span", { class: "mono", text: a.patient_id })], ["Service", h("span", { class: "mono", text: a.service_code })],
-          ["Service date", Core.date(a.service_date)]]),
+      return block(`/attachments/${i}`, `Document ${a.attachment_id}`, h("div", { class: "stack stack--tight" },
+        fields([["Type", `/attachments/${i}/type`, value(a.type)], ["Status", `/attachments/${i}/document_status`, value(a.document_status)],
+          ["Patient", `/attachments/${i}/patient_id`, mono(a.patient_id)], ["Service", `/attachments/${i}/service_code`, mono(a.service_code)],
+          ["Service date", `/attachments/${i}/service_date`, day(a.service_date)]]),
         h("details", { class: "disclosure", open: flaggedHere ? null : true },
           h("summary", { text: flaggedHere ? "Show the flagged text (untrusted, shown as data)" : "Document text (untrusted, shown as data)" }),
-          h("pre", { class: "untrusted", text: a.text })));
+          h("pre", { class: "untrusted", "data-path": `/attachments/${i}/text`, text: a.text }))));
     }));
   }
 
-  function partiesCard(c) {
-    const policyKnown = Object.prototype.hasOwnProperty.call(DATA.policies, c.policy_id);
-    return card({ title: "Claim parties", body: kv([
-      ["Patient", h("span", { class: "mono" }, value(c.patient_id))],
-      ["Member", h("span", { class: "mono" }, value(c.member_id))],
-      ["Provider", h("span", { class: "mono" }, value(c.provider_id))],
-      ["Payer", h("span", { class: "mono" }, value(c.payer_id))],
-      ["Policy", h("span", { class: "row" }, h("span", { class: "mono", text: c.policy_id }),
-        policyKnown ? null : badge("No matching policy supplied", { tone: "unknown", icon: "help-circle" }))],
-      ["Invoice", h("span", { class: "mono" }, value(c.invoice_number))],
-      ["Diagnosis", h("span", { class: "mono" }, value(c.diagnosis_code))],
-    ]) });
+  // The claim fields a pointer names: the field itself, else everything
+  // inside it (a whole line), else the nearest field holding it.
+  function targets(pane, path) {
+    const all = Array.from(pane.querySelectorAll("[data-path]"));
+    let hit = all.filter((el) => el.dataset.path === path);
+    if (!hit.length) hit = all.filter((el) => el.dataset.path.startsWith(`${path}/`));
+    for (let p = path; !hit.length && p.lastIndexOf("/") > 0;) {
+      p = p.slice(0, p.lastIndexOf("/"));
+      hit = all.filter((el) => el.dataset.path === p);
+    }
+    return hit;
   }
 
-  function coverageCard(c) {
-    const cv = c.coverage;
-    return card({ title: "Coverage", body: kv([
-      ["Coverage", h("span", { class: "mono", text: cv.coverage_id })],
-      ["Status field", value(cv.status)],
-      ["Beneficiary", h("span", { class: "mono" }, value(cv.beneficiary_patient_id))],
-      ["Member", h("span", { class: "mono" }, value(cv.member_id))],
-      ["Period", `${cv.start_date ? Core.date(cv.start_date) : "—"} – ${cv.end_date ? Core.date(cv.end_date) : "—"}`],
-    ]) });
+  // ----------------------------------------------------------- workspace
+  function workspace(entry, initialRule, onDecided) {
+    const id = entry.route.claim_id;
+    const finds = Core.findings(entry).slice().sort((a, b) =>
+      ((SEVERITY_RANK[a.result.severity] ?? 3) - (SEVERITY_RANK[b.result.severity] ?? 3))
+      || ((STATUS_RANK[a.result.status] ?? 3) - (STATUS_RANK[b.result.status] ?? 3))
+      || a.result.rule_id.localeCompare(b.result.rule_id));
+    const st = {
+      selected: finds.some((f) => f.result.rule_id === initialRule) ? initialRule : (finds[0] ? finds[0].result.rule_id : null),
+      f: { status: "", severity: "", decision: "", q: "" },
+      pending: {}, errors: {}, active: null,
+    };
+    const stateOf = (rule) => (draftFor(entry, rule) ? "draft" : recordedFor(entry, rule) ? "logged" : "open");
+
+    const pane = h("div", { class: "ws-pane ws-pane--claim", role: "region", "aria-label": "Claim data", tabindex: "-1" }, claimPane(entry));
+    const findingHolder = h("div", { class: "ws-pane ws-pane--finding" });
+    const listHolder = h("div");
+    const count = h("span", { class: "filters__count", role: "status" });
+    const progressHolder = h("div");
+    const announce = h("p", { class: "sr-only", role: "status" });
+
+    function visible() {
+      const q = st.f.q.trim().toLowerCase();
+      return finds.filter(({ result: r }) => (!st.f.status || r.status === st.f.status) && (!st.f.severity || r.severity === st.f.severity)
+        && (!st.f.decision || stateOf(r.rule_id) === st.f.decision)
+        && (!q || `${r.rule_id} ${ruleName(r.rule_id)}`.toLowerCase().includes(q)));
+    }
+
+    function drawProgress() {
+      const decided = Object.keys(Core.latestDecisions(entry, decisions())).length;
+      fill(progressHolder, bars([{ label: "Decided", value: decided, total: finds.length, tone: "primary", display: `${decided} / ${finds.length}` }]));
+    }
+
+    function drawList() {
+      const vis = visible();
+      const roving = vis.some((f) => f.result.rule_id === st.selected) ? st.selected : (vis[0] ? vis[0].result.rule_id : null);
+      count.textContent = `${vis.length} of ${Core.plural(finds.length, "finding")}`;
+      fill(listHolder, vis.length ? h("ul", { class: "ws-list", role: "listbox", "aria-label": "Findings" }, vis.map(({ result: r }) => {
+        const d = stateOf(r.rule_id);
+        const draft = d === "draft" ? draftFor(entry, r.rule_id) : null;
+        return h("li", { role: "option", id: `opt-${r.rule_id}`, class: "ws-item", "data-rule": r.rule_id,
+          "aria-selected": String(r.rule_id === st.selected), tabindex: r.rule_id === roving ? "0" : "-1",
+          onClick: () => select(r.rule_id, true),
+          onKeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(r.rule_id, false); openFinding(); } } },
+          h("span", { class: "ws-item__top" }, h("span", { class: "mono", text: r.rule_id }), statusBadge(r.status, { short: true }), severityBadge(r.severity)),
+          h("span", { class: "ws-item__title", text: ruleName(r.rule_id) }),
+          h("span", { class: `ws-item__state is-${d}`, text: draft ? `Draft: ${Core.ACTION[draft.action].label}` : DECISION_STATE[d] }));
+      })) : emptyState({ icon: "search", title: "No finding matches", text: "Change or clear the filters." }));
+    }
+
+    // Layer 1 marks every field the finding cites; a pressed chip marks one
+    // strongly and brings it into view in the claim pane.
+    function markEvidence(r) {
+      pane.querySelectorAll(".is-cited, .is-thread").forEach((el) => el.classList.remove("is-cited", "is-thread"));
+      if (!r) return;
+      for (const e of r.evidence) targets(pane, e.path).forEach((el) => el.classList.add("is-cited"));
+      if (st.active) {
+        const hit = targets(pane, st.active);
+        hit.forEach((el) => el.classList.add("is-thread"));
+        if (hit[0]) hit[0].scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    }
+
+    function drawFinding() {
+      const f = finds.find((x) => x.result.rule_id === st.selected);
+      if (!f) {
+        fill(findingHolder, emptyState({ icon: "check-check", title: "No finding", text: "Nothing on this claim needs a decision." }));
+        markEvidence(null);
+        return;
+      }
+      const r = f.result;
+      const draft = draftFor(entry, r.rule_id);
+      const p = st.pending[r.rule_id] || (st.pending[r.rule_id] = { action: draft ? draft.action : null, reason: draft ? draft.reason : "" });
+      const chips = h("div", { class: "chips" });
+      const drawChips = () => fill(chips, r.evidence.map((e) => evidenceChip(e, entry.claim, { active: st.active === e.path,
+        onShow: (ev) => {
+          st.active = st.active === ev.path ? null : ev.path;
+          chips.querySelectorAll(".chip").forEach((c, i) => c.setAttribute("aria-pressed", String(st.active === r.evidence[i].path)));
+          markEvidence(r);
+          if (st.active) announce.textContent = `${Core.fieldLabel(ev.path, Core.current(entry).claim)} highlighted in the claim data.`;
+        } })));
+      drawChips();
+      const article = findingBlock({ result: r, claimLayer: chips, explanationLayer: explanationLayer(entry, r),
+        decisionLayer: decisionPanel({ id: r.rule_id, action: p.action, reason: p.reason, reviewer: State.reviewer, allowed: can,
+          notImplemented: r.status === "NOT_IMPLEMENTED", draft, recorded: recordedFor(entry, r.rule_id), error: st.errors[r.rule_id] || null,
+          onAction: (a) => { p.action = a; }, onReason: (v) => { p.reason = v; },
+          onName: (v) => { State.reviewer = v; State.save(); },
+          onSave: (d) => save(r, d),
+          onDiscard: () => { discardDraft(entry, r.rule_id); p.action = null; p.reason = ""; changed(r.rule_id, "Draft discarded.", false); } }) });
+      article.id = `finding-${r.rule_id}`;
+      article.setAttribute("tabindex", "-1");
+      fill(findingHolder, article);
+      markEvidence(r);
+    }
+
+    function select(rule, focusItem) {
+      if (rule === st.selected && findingHolder.firstChild) { if (focusItem) focusOption(rule); return; }
+      st.selected = rule;
+      st.active = null;
+      history.replaceState(null, "", href("claims", id, { finding: rule }));
+      drawList();
+      drawFinding();
+      if (focusItem) focusOption(rule);
+    }
+    function focusOption(rule) { const el = document.getElementById(`opt-${rule}`); if (el) el.focus(); }
+    function openFinding() { const el = findingHolder.querySelector("article"); if (el) el.focus(); }
+
+    // Saved: the next undecided finding opens, so a claim is decided in
+    // one pass. A browser that would not store the draft keeps it on this
+    // page and says so, with the reason still in the box.
+    function save(r, d) {
+      const ok = saveDraft(Core.decisionEvent(entry, r, d.action, State.reviewer, d.reason, new Date().toISOString()));
+      st.errors[r.rule_id] = ok ? null
+        : "This browser would not store the draft (storage is full or blocked). It is kept on this page until you reload: download your decisions before you leave.";
+      changed(r.rule_id, ok ? `Draft saved for ${r.rule_id}.` : `Not stored: ${r.rule_id} is kept on this page only.`, ok);
+    }
+    function changed(rule, message, advance) {
+      onDecided();
+      drawProgress();
+      const next = advance ? visible().find((f) => f.result.rule_id !== rule && stateOf(f.result.rule_id) === "open") : null;
+      if (next) {
+        st.selected = next.result.rule_id;
+        st.active = null;
+        history.replaceState(null, "", href("claims", id, { finding: st.selected }));
+      }
+      drawList();
+      drawFinding();
+      announce.textContent = next ? `${message} Next: ${st.selected} ${ruleName(st.selected)}.` : message;
+      openFinding();
+    }
+
+    function move(step) {
+      const vis = visible();
+      if (!vis.length) return;
+      const i = vis.findIndex((f) => f.result.rule_id === st.selected);
+      const j = i < 0 ? 0 : Math.min(vis.length - 1, Math.max(0, i + step));
+      select(vis[j].result.rule_id, true);
+    }
+    const root = h("div", { class: "workspace" });
+    keyHandler = (e) => {
+      if (!root.isConnected) { keyHandler = null; return; }
+      if (e.altKey || e.ctrlKey || e.metaKey || panelState) return;
+      const t = e.target instanceof Element ? e.target : null;
+      if (t && t.closest("input, textarea, select, [contenteditable]")) return;
+      const inList = !!(t && t.closest(".ws-list"));
+      const step = e.key === "j" || (inList && e.key === "ArrowDown") ? 1 : e.key === "k" || (inList && e.key === "ArrowUp") ? -1 : 0;
+      if (!step) return;
+      e.preventDefault();
+      move(step);
+    };
+
+    const set = (key) => (v) => { st.f[key] = v; drawList(); };
+    const filters = filterBar([
+      { label: "Status", value: "", onChange: set("status"), options: [["", "All"], ...["FAIL", "UNABLE_TO_ASSESS", "NOT_IMPLEMENTED"]
+        .filter((s) => finds.some((f) => f.result.status === s)).map((s) => [s, Core.STATUS[s].label])] },
+      { label: "Severity", value: "", onChange: set("severity"), options: [["", "All"], ...["high", "medium", "low"]
+        .filter((s) => finds.some((f) => f.result.severity === s)).map((s) => [s, Core.SEVERITY[s].label])] },
+      { label: "Decision", value: "", onChange: set("decision"), options: [["", "All"], ...Object.entries(DECISION_STATE)] },
+    ]);
+    const search = searchField({ placeholder: "Rule ID or name", label: "Search findings", value: "", onInput: set("q") });
+
+    drawProgress();
+    drawList();
+    drawFinding();
+    return fill(root,
+      h("section", { class: "ws-pane ws-pane--list", "aria-label": "Findings to decide" },
+        h("div", { class: "ws-list-head" },
+          h("h3", { class: "card__title", text: `Findings to decide (${finds.length})` }), progressHolder,
+          h("details", { class: "disclosure" }, h("summary", { text: "Filter and search" }), h("div", { class: "stack stack--tight" }, filters, search)),
+          h("div", { class: "row row--between" }, count, h("span", { class: "muted small", text: "j / k to move · Enter to open" }))),
+        listHolder),
+      findingHolder, pane, announce);
   }
 
-  // Corrected versions of this claim (python -m claimguard.review.correct).
+  // ------------------------------------------------- below the workspace
   function versionsCard(entry) {
     if (!entry.versions || !entry.versions.length) return null;
     return card({ title: "Corrected versions", meta: "The claim as received (v1) is never edited", body: h("div", { class: "stack" },
@@ -352,53 +484,26 @@ const ClaimDetail = (function () {
         checkGrid(v.results)))) });
   }
 
-  // This claim's audit events your role may see, then decisions not yet sent.
+  // This claim's audit events your role may see, then decisions not yet
+  // sent, as one timeline: a draft never looks like a logged event.
   function historyCard(entry) {
     const id = entry.route.claim_id;
     const rows = DATA.audit ? DATA.audit.events.filter((r) => r.event.claim_id === id && canSeeEvent(r.event)) : [];
-    const drafts = State.drafts.filter((d) => d.claim_id === id);
     const items = [
-      ...rows.map((r) => h("button", { type: "button", class: "stage", style: { width: "100%" }, onClick: () => AuditPage.eventPanel(r) },
-        h("span", { class: "row" }, eventBadge(r.event), h("span", { class: "muted small", text: `#${r.sequence} · ${Core.datetime(r.recorded_at)}` })),
-        h("span", { class: "small", text: eventSummary(r.event) }))),
-      ...drafts.map((d) => h("div", { class: "stage is-skipped" },
-        h("span", { class: "row" }, badge("Draft in this browser", { tone: "neutral", icon: "user" })),
-        h("span", { class: "small", text: eventSummary(d) }))),
+      ...rows.map((r) => ({ kind: "logged", badge: eventBadge(r.event), meta: `#${r.sequence} · ${Core.datetime(r.recorded_at)}`,
+        text: eventSummary(r.event), onOpen: () => AuditPage.eventPanel(r) })),
+      ...State.drafts.filter((d) => d.claim_id === id).map((d) => ({ kind: "draft", badge: eventBadge(d),
+        meta: Core.datetime(d.created_at), text: eventSummary(d) })),
     ];
-    return card({ title: "History", meta: DATA.audit ? "From the audit log" : null, body: items.length
-      ? h("div", { class: "stack" }, items)
+    return card({ title: "History", meta: DATA.audit ? "Audit log, then drafts in this browser" : null, body: items.length
+      ? timeline(items, { label: `History of ${id}` })
       : h("p", { class: "muted small", text: DATA.audit ? "No event your role can see for this claim yet." : "No audit log was loaded for this run." }) });
   }
 
-  function progressCard(entry) {
-    const events = decisions();
-    const cur = Core.current(entry);
-    const total = cur.route.reasons.length;
-    const decided = Object.keys(Core.latestDecisions(entry, events)).length;
-    const mine = State.drafts.filter((d) => d.claim_id === cur.route.claim_id && d.input_hash === cur.input_hash).length;
-    return card({ title: "Review progress", body: h("div", { class: "stack" },
-      h("div", { class: "row" }, outcomeBadge(Core.outcome(entry, events))),
-      total ? bars([{ label: "Findings decided", value: decided, total, tone: "primary", display: `${decided} / ${total}` }])
-        : h("p", { class: "muted small", text: "Nothing to decide on this claim." }),
-      h("p", { class: "small", text: `${Core.plural(mine, "draft")} on this claim · ${Core.plural(State.drafts.length, "draft")} in all.` }),
-      button({ label: `Download decisions (${State.drafts.length})`, variant: "primary", icon: "download",
-        disabled: State.drafts.length === 0, onClick: downloadDecisions }),
-      h("p", { class: "muted small", text: "Decisions are kept in this browser until you download them." })) });
-  }
-
-  function nameCard(nameWatchers) {
-    const input = h("input", { id: "reviewer-name", class: "input", value: State.reviewer, autocomplete: "name",
-      placeholder: "e.g. Reviewer 01",
-      onInput: (e) => { State.reviewer = e.target.value; State.save(); nameWatchers.forEach((fn) => fn()); } });
-    input.value = State.reviewer;
-    return card({ title: "Your decisions", body: h("div", { class: "stack" },
-      h("label", { class: "field", for: "reviewer-name" }, "Your name", input),
-      h("p", { class: "muted small", text: `Role: ${State.role === "admin" ? "Admin" : "Reviewer"}. Your name is recorded with each decision.` })) });
-  }
-
-  function render(id) {
+  function render(id, params) {
     const entry = CLAIM_BY_ID.get(id);
     if (!entry) {
+      keyHandler = null;
       return card({ body: emptyState({ icon: "search", title: `No claim ${id} in this run`,
         text: "It may have been rejected at ingestion, or belong to another run.", action: linkButton({ href: href("claims"), label: "All claims", icon: "chevron-left" }) }) });
     }
@@ -408,10 +513,11 @@ const ClaimDetail = (function () {
     const c = cur.claim;
     const onVersion = cur.version > 1 ? ` on v${cur.version}` : "";
     const [prev, next] = ClaimViews.neighbours(id);
-    const headBadges = h("span", { class: "row" });
+    const headBadges = h("span", { class: "row row--tight" });
     const lifecycleHolder = h("div");
-    const progressHolder = h("div");
-    const nameWatchers = [];
+    const bannerHolder = h("div");
+    const historyHolder = h("div");
+    let ws = null;
 
     function refresh() {
       const events = decisions();
@@ -424,52 +530,51 @@ const ClaimDetail = (function () {
           screened: entry.flag ? "sec-flag" : "sec-checks", explained: "sec-findings", routed: "sec-route",
           review: "sec-findings", outcome: "sec-findings" }[s.key]),
       }));
-      fill(progressHolder, progressCard(entry));
+      fill(bannerHolder, draftsBanner());
+      fill(historyHolder, historyCard(entry));
       Shell.refreshUser();
     }
     refresh();
-
+    ws = workspace(entry, params && params.finding, refresh);
+    // A route reason or a check opens its finding in the workspace.
+    const pick = (rule) => {
+      const el = document.getElementById(`opt-${rule}`);
+      if (!el) return;
+      document.getElementById("sec-findings").scrollIntoView({ behavior: "smooth", block: "start" });
+      el.click();
+    };
     const counts = Core.statusCounts(cur.results);
     const finds = Core.findings(entry);
 
     return h("div", { class: "stack" },
-      h("div", { class: "row row--between" },
-        linkButton({ href: href("claims"), label: "All claims", icon: "chevron-left", variant: "ghost" }),
-        h("div", { class: "row" },
-          prev ? linkButton({ href: href("claims", prev), label: "Previous", icon: "chevron-left" }) : null,
-          next ? linkButton({ href: href("claims", next), label: "Next", icon: "chevron-right" }) : null)),
-      h("div", { class: "claim-head" },
-        h("div", { class: "claim-head__title" }, h("h2", { text: c.claim_id }), headBadges),
+      h("header", { class: "claim-head" },
+        h("div", { class: "claim-head__title" },
+          linkButton({ href: href("claims"), label: "All claims", icon: "chevron-left", variant: "ghost" }),
+          h("h2", { text: c.claim_id }), headBadges, fingerprint(cur.results),
+          h("div", { class: "row row--tight claim-head__nav" },
+            prev ? linkButton({ href: href("claims", prev), label: "Previous", icon: "chevron-left" }) : null,
+            next ? linkButton({ href: href("claims", next), label: "Next", icon: "chevron-right" }) : null)),
         h("dl", { class: "facts" },
-          [["Total", Core.money(c.total_amount, c.currency)], ["Submitted", Core.date(c.submission_date)],
+          [["Total", h("span", { class: "num", text: Core.money(c.total_amount, c.currency) })], ["Submitted", Core.date(c.submission_date)],
             ["Policy", c.policy_id], ["Provider", c.provider_id], ["Lines", Core.number(c.lines.length)]]
-            .map(([k, v]) => h("div", {}, h("dt", { text: k }), h("dd", { text: v }))))),
-      card({ title: "Life cycle", body: lifecycleHolder }),
-      versionsCard(entry),
+            .map(([k, v]) => h("div", {}, h("dt", { text: k }), h("dd", {}, v))))),
+      bannerHolder,
       entry.flag ? section("sec-flag", flagCallout(entry)) : null,
-      h("div", { class: "grid grid--main-side" },
-        h("div", { class: "stack" },
-          cur.version > 1 ? callout({ tone: "info", icon: "refresh", title: `Deciding on version ${cur.version}`,
-            text: `This claim was corrected and rechecked. Its findings, checks and data below are those of v${cur.version}; ` +
-              "decisions on an earlier version no longer count. The claim as received (v1) is kept unchanged below." }) : null,
-          section("sec-route", routeCallout(cur)),
-          section("sec-checks", card({ title: `All 15 checks${onVersion}`,
-            meta: `${counts.PASS} passed · ${counts.FAIL} failed · ${counts.UNABLE_TO_ASSESS} unable · ${counts.NOT_APPLICABLE} n/a` +
-              (counts.NOT_IMPLEMENTED ? ` · ${counts.NOT_IMPLEMENTED} not implemented` : ""),
-            body: checkGrid(cur.results, { onPick: (r) => (finds.some((f) => f.result.rule_id === r.rule_id)
-              ? scrollToId(`finding-${r.rule_id}`) : resultPanel(cur, r)) }) })),
-          section("sec-findings", h("section", { class: "stack", "aria-label": "Findings to decide" },
-            h("h3", { class: "card__title", text: finds.length ? `Findings to decide${onVersion} (${finds.length})` : "Findings to decide" }),
-            finds.length ? finds.map((f) => findingCard(cur, f, refresh, nameWatchers))
-              : card({ body: emptyState({ icon: "check-check", title: "No finding", text: "Nothing on this claim needs a decision." }) }))),
-          card({ title: "Service lines", flush: true, body: linesTable(c) }),
-          card({ title: "Authorizations", flush: !!c.authorizations.length, body: authorizationsBlock(c) }),
-          card({ title: "Documents", body: attachmentsBlock(cur) }),
-          historyCard(entry),
-          section("sec-received", card({ title: "Claim as received", body: h("details", { class: "disclosure" },
-            h("summary", { text: "Show the JSON envelope (untrusted text shown as data)" }),
-            h("pre", { class: "untrusted", text: JSON.stringify(entry.claim, null, 2) })) }))),
-        h("div", { class: "sticky-side" }, nameCard(nameWatchers), progressHolder, partiesCard(c), coverageCard(c))));
+      cur.version > 1 ? callout({ tone: "info", icon: "refresh", title: `Deciding on version ${cur.version}`,
+        text: `This claim was corrected and rechecked. Its findings, checks and data are those of v${cur.version}; ` +
+          "decisions on an earlier version no longer count. The claim as received (v1) is kept unchanged below." }) : null,
+      finds.length ? section("sec-findings", ws) : section("sec-findings", routeCallout(cur, pick)),
+      finds.length ? section("sec-route", routeCallout(cur, pick)) : null,
+      card({ title: "Life cycle", body: lifecycleHolder }),
+      section("sec-checks", card({ title: `All 15 checks${onVersion}`,
+        meta: `${counts.PASS} passed · ${counts.FAIL} failed · ${counts.UNABLE_TO_ASSESS} unable · ${counts.NOT_APPLICABLE} n/a` +
+          (counts.NOT_IMPLEMENTED ? ` · ${counts.NOT_IMPLEMENTED} not implemented` : ""),
+        body: checkGrid(cur.results, { onPick: (r) => (finds.some((f) => f.result.rule_id === r.rule_id) ? pick(r.rule_id) : resultPanel(cur, r)) }) })),
+      versionsCard(entry),
+      historyHolder,
+      section("sec-received", card({ title: "Claim as received", body: h("details", { class: "disclosure" },
+        h("summary", { text: "Show the JSON envelope (untrusted text shown as data)" }),
+        h("pre", { class: "untrusted", text: JSON.stringify(entry.claim, null, 2) })) })));
   }
 
   return { render };
@@ -482,9 +587,10 @@ registerPage({
   icon: "file-text",
   subtitle: "Every checked claim, its 15 checks, evidence and decisions.",
   render(route) {
-    if (route.id) return ClaimDetail.render(route.id);
+    if (route.id) return ClaimDetail.render(route.id, route.params);
     const routes = Core.count(CLAIMS, (c) => c.route.route);
     return h("div", { class: "stack" },
+      draftsBanner(),
       statRow([
         statCard({ icon: "file-check", tone: "info", label: "Claims checked", value: Core.number(CLAIMS.length),
           caption: DATA.rejected.length ? `${DATA.rejected.length} rejected at ingestion` : "None rejected at ingestion", href: href("claims") }),

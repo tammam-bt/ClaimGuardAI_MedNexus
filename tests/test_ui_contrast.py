@@ -23,6 +23,8 @@ PAIRS = [
     *[(f"--color-{s}", "--color-surface-raised") for s in ("success", "warning", "error", "info")],
     ("--color-escalate", "--color-escalate-bg"), ("--color-review", "--color-review-bg"), ("--color-clear", "--color-clear-bg"),
     ("--color-severity-high", "--color-surface-raised"), ("--color-severity-medium", "--color-surface-raised"),
+    # the selected finding in the workspace list, and claim fields a finding cites
+    *[(t, "--color-primary-subtle") for t in ("--color-text", "--color-text-muted", "--color-success", "--color-info")],
 ]
 # Non-text contrast (WCAG 1.4.11): 3:1 against what they sit on.
 FOCUS_ON = ("--color-bg", "--color-surface", "--color-surface-raised", "--color-sidebar")

@@ -118,3 +118,19 @@ Not a finding: in the full-page screenshots the dark sidebar stops at 900 px. It
 - 0 px sideways scroll at all four widths, 375 px included.
 - Keyboard: on a claim, the first decision reachable within the first stops of the content, and the name field before Save in tab order; no list costs one stop per row.
 - The "after" screenshots taken with the same script and widths.
+
+## 7. Progress after P3
+
+Measured with the same script on the same machine, back to back with this baseline (three rounds each).
+
+| # | Finding | After P3 (`mak/p3-review-workspace`) |
+|---|---|---|
+| 2 | Name field last in tab order | The name field sits beside Save in each decision panel. The keyboard e2e test types it on the way to Save. |
+| 3 | One tab stop per row | Fixed in the claim workspace: the findings list is one stop (roving focus), with j / k and the arrow keys to move and Enter to open. The Queue and Claims tables are P4. |
+| 4 | First decision 1,560 px down | The claim is a three-pane workspace. At 1440 × 900 the whole first finding, Save included, is on screen (Save ends at 861 px). The first decision is tab stop 22 from the top, was 41; from the content, 5 stops reach the findings list and 7 more the first action. |
+| 5 | Reason box promises the audit log | Now "Kept with your name in this browser's draft"; the label says an administrator adds drafts to the audit log. |
+| 6 | Download as the main action; "View as" | "Download decisions" is a secondary button on Queue, Claims and Settings, and in a drafts banner ("not in the audit log until an administrator appends them"). The switch reads "Demo: view as". |
+| 8 | Evidence tables without a name | Named ("Evidence the engine cited"). |
+| 10 | Nothing announces a saved draft | Announced on the claim page ("Draft saved for R003. Next: R004 …"). |
+
+Render time is unchanged: first frame 77–98 ms against 80–97 ms for this baseline, the claim page 20–21 ms against 21–23 ms. P2 closed 13 (dark theme). Still open: 1 (375 px, P7); 3 for the Queue and Claims tables, 9 and 12 (P4); 7 and 11 (heading levels, tab keys); 14 (P5).

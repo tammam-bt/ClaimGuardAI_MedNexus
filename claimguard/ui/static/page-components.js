@@ -69,6 +69,7 @@ function signature(sample, fail, specimen) {
       specimen("No name yet: the field comes before Save", panel({ key: "noname", reviewer: "", action: "confirm_issue", reason: "Example reason." })),
       specimen("Action chosen, no reason", panel({ key: "noreason", action: "dismiss_with_reason" })),
       specimen("Ready to save", panel({ key: "ready", action: "request_information", reason: "Example: the coverage letter is missing." })),
+      specimen("Dismiss asks once more before saving", panel({ key: "confirm", action: "dismiss_with_reason", reason: "Example: coverage was extended.", confirming: true })),
       specimen("Draft saved", panel({ key: "draft", draft: example, action: "confirm_issue", reason: example.reason })),
       specimen("Save failed: the reason is kept", panel({ key: "error", action: "confirm_issue", reason: "Example reason kept after a failure.",
         error: "This browser refused to store the draft." })),

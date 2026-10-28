@@ -35,6 +35,7 @@ mark_corrected_for_recheck (claimguard.guards.rbac): the version and its
 audit event would otherwise carry any name typed on the command line.
 """
 import argparse
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -43,6 +44,8 @@ from claimguard.audit import chain
 from claimguard.guards.rbac import PermissionDenied, authorize, load_directory
 from claimguard.ingest.jsonl import claims_by_id
 from claimguard.review.correction import correct, original, recheck, rule_engine
+
+COMMAND = "claimguard.review.correct"
 
 
 def latest_version(claim, folder):
@@ -81,10 +84,13 @@ def latest_results(claim, folder):
     return version, record["results"]
 
 
-def correct_claim(claims_path, claim_id, changes, *, actor, reason, directory, output, log=None, anchor=None):
+def correct_claim(claims_path, claim_id, changes, *, actor, reason, directory, output, log=None, anchor=None,
+                  changes_sha256=None):
     """Recheck one correction; returns the written record. Raises ValueError, writing nothing.
     directory is {actor: role}; the actor must be in it with a role that may
-    mark_corrected_for_recheck."""
+    mark_corrected_for_recheck. changes_sha256 is the SHA-256 of the changes
+    file, recorded in the append_performed event; without a file, the
+    changes' digest is recorded instead."""
     try:
         authorize(directory, actor, "mark_corrected_for_recheck")
     except PermissionDenied as e:
@@ -101,7 +107,8 @@ def correct_claim(claims_path, claim_id, changes, *, actor, reason, directory, o
     out = Path(output) / f"{claim_id}.v{run.version.version}.json"
     if log:
         # The chain first: if it refuses, no version file claims to be recorded.
-        chain.append(log, [{"event": "version_created", **run.version.record()}], anchor or chain.default_anchor(log))
+        chain.append(log, [{"event": "version_created", **run.version.record()}], anchor or chain.default_anchor(log),
+                     performed=(COMMAND, changes_sha256 or chain.digest(changes)))
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return out, record
@@ -120,10 +127,11 @@ def main(argv=None):
     p.add_argument("--anchor")
     a = p.parse_args(argv)
     try:
-        changes = json.loads(Path(a.changes).read_text(encoding="utf-8"))
+        raw = Path(a.changes).read_bytes()
+        changes = json.loads(raw.decode("utf-8"))
         out, record = correct_claim(a.claims, a.claim_id, changes, actor=a.actor, reason=a.reason,
                                     directory=load_directory(a.directory), output=a.output, log=a.log,
-                                    anchor=a.anchor)
+                                    anchor=a.anchor, changes_sha256=hashlib.sha256(raw).hexdigest())
     except (ValueError, chain.AuditError) as e:
         print(f"Correction refused: {e}")
         return 1

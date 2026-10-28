@@ -28,6 +28,8 @@ adds nothing. --directory is required: a JSON file naming each actor's role
 claimguard.guards.rbac.load_directory. The interface's names are
 self-declared (doc 10: no authentication), so this file is the one place a
 role comes from, and an actor who is not in it cannot record anything.
+The batch ends with one append_performed event (claimguard.audit.chain):
+the OS user who ran this command and the decisions file's SHA-256.
 """
 import argparse
 import json
@@ -44,6 +46,7 @@ from claimguard.review.correction import version_hash
 FIELDS = frozenset(chain.EVENT_FIELDS["review_decision"] | {"event"})
 SCHEMA_KEYS = FIELDS - {"event", "input_hash"}  # schemas/review_event.schema.json
 FLAGGED = ("FAIL", "UNABLE_TO_ASSESS", "NOT_IMPLEMENTED")
+COMMAND = "claimguard.ui.decisions"
 
 
 def _iso(value):
@@ -120,7 +123,8 @@ def append_decisions(decisions_path, log, *, claims_path, results_path, director
     anchor = anchor or chain.default_anchor(log)
     recorded = [row["event"] for row in load_jsonl(log)] if Path(log).exists() else []
     new = [e for e in events if e not in recorded]
-    head, count = chain.append(log, new, anchor) if new else chain.verify(log, anchor)
+    head, count = (chain.append(log, new, anchor, performed=(COMMAND, chain.file_sha256(decisions_path)))
+                   if new else chain.verify(log, anchor))
     return {"read": len(events), "appended": len(new), "already_in_chain": len(events) - len(new),
             "events_in_chain": count, "head": head}
 

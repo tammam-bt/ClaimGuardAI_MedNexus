@@ -79,14 +79,19 @@ class RunCase(unittest.TestCase):
 
 class DecisionTests(RunCase):
     def test_good_decisions_are_appended_once(self):
+        # The run wrote 7 events (its 6, then append_performed); the decisions add 2 and one append_performed.
         events = [self.decision(), self.decision(rule_id="R004")]
         first = self.append(events)
-        self.assertEqual((first["appended"], first["events_in_chain"]), (2, 8))
-        again = self.append(events)
-        self.assertEqual((again["appended"], again["already_in_chain"], again["events_in_chain"]), (0, 2, 8))
-        self.assertEqual(chain.verify(self.log, chain.default_anchor(self.log))[1], 8)
-        recorded = [row["event"] for row in load_jsonl(self.log)][-2:]
-        self.assertEqual(recorded, events)
+        self.assertEqual((first["appended"], first["events_in_chain"]), (2, 10))
+        again = self.append(events)  # nothing new: no append_performed either
+        self.assertEqual((again["appended"], again["already_in_chain"], again["events_in_chain"]), (0, 2, 10))
+        self.assertEqual(chain.verify(self.log, chain.default_anchor(self.log))[1], 10)
+        recorded = [row["event"] for row in load_jsonl(self.log)]
+        self.assertEqual(recorded[-3:-1], events)
+        self.assertEqual([e["command"] for e in recorded if e["event"] == "append_performed"],
+                         ["claimguard.run", "claimguard.ui.decisions"])
+        self.assertEqual((recorded[-1]["input_sha256"], recorded[-1]["events"]),
+                         (chain.file_sha256(self.dir / "decisions.jsonl"), 2))
 
     def test_one_bad_decision_writes_nothing(self):
         before = self.log.read_bytes()
@@ -153,9 +158,12 @@ class CorrectionTests(RunCase):
         self.assertEqual(record["status_changes"], [{"rule_id": "R008", "before": "FAIL", "after": "PASS"},
                                                     {"rule_id": "R009", "before": "UNABLE_TO_ASSESS", "after": "PASS"}])
         self.assertEqual(len(record["results"]), 15)
-        last = load_jsonl(self.log)[-1]["event"]
+        last, performed = (row["event"] for row in load_jsonl(self.log)[-2:])
         self.assertEqual((last["event"], last["claim_id"], last["version"]), ("version_created", AUTH_CLAIM, 2))
         self.assertEqual(json.loads(out.read_text(encoding="utf-8"))["input_hash"], last["input_hash"])
+        self.assertEqual((performed["event"], performed["command"], performed["events"]),
+                         ("append_performed", "claimguard.review.correct", 1))
+        self.assertEqual(performed["input_sha256"], chain.digest(FIX))  # no changes file: the changes' digest
 
     def test_a_rule_error_is_recorded_and_fails_the_command(self):
         def boom(ctx):
@@ -177,6 +185,19 @@ class CorrectionTests(RunCase):
         self.assertIn("R009", printed.getvalue())
         record = json.loads((self.dir / "corrections" / f"{AUTH_CLAIM}.v2.json").read_text(encoding="utf-8"))
         self.assertEqual({(e["rule_id"], e["error"]) for e in record["rule_errors"]}, {("R009", "ZeroDivisionError")})
+
+    def test_the_command_records_the_changes_files_hash(self):
+        changes = self.dir / "fix.json"
+        changes.write_text(json.dumps(FIX, indent=2), encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = correct_main(["--claims", str(DEV / "claims.jsonl"), "--claim-id", AUTH_CLAIM,
+                                 "--changes", str(changes), "--actor", "Reviewer 01", "--reason", "Authorization added.",
+                                 "--directory", str(self.directory_file()), "--output", str(self.dir / "corrections"),
+                                 "--log", str(self.log)])
+        self.assertEqual(code, 0)
+        performed = load_jsonl(self.log)[-1]["event"]
+        self.assertEqual((performed["event"], performed["input_sha256"]),
+                         ("append_performed", chain.file_sha256(changes)))
 
     def test_a_refused_correction_writes_nothing(self):
         before = self.log.read_bytes()

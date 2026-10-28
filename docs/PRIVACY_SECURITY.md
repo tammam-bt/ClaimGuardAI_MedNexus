@@ -16,7 +16,7 @@ Every control below names the test that proves it. Every gap is stated as a gap.
 **Assets:**
 1. The **scored results**: their statuses and evidence must come only from the rules.
 2. The **claim data**: identifiers and free text, synthetic here and personal data in production.
-3. The **review decisions**: who decided what, why, and on which version of a claim.
+3. The **review decisions**: who decided what, why, and on which version of a claim. Reviewer names are self-declared; the log records the OS user who appended them (`append_performed`). That user name is personal data, and a hash chain can never erase it, so the page shows it to admins only.
 4. The **audit log**: the record of all of the above.
 5. The **API key**, once a live model is used.
 
@@ -87,7 +87,7 @@ Two roles, defined in `claimguard/guards/rbac.py` and shown on the page's Settin
 | AI explainer | one minimized finding and its rule | the explanations file | write a status; see the claim, its ID or its free text; call a tool, the network or the shell |
 | Routing | results, review events | routing rows | change a finding |
 | Review page | one run's outputs, embedded at build time | drafts in the browser, a downloaded decisions file | load or send anything; write the audit log |
-| Decision command | decisions, claims, results, the actor directory | `review_decision` events | append anything from a file in which one decision fails |
+| Decision command | decisions, claims, results, the actor directory | `review_decision` events, then one `append_performed` | append anything from a file in which one decision fails |
 | Correction command | a claim version, the actor directory | a new version and its results, a `version_created` event | edit the original; change `claim_id`, `schema_version` or a `line_id` |
 | Audit chain | its log and anchor | appended rows; the anchor | rewrite or delete a row |
 | Gate | results, claims, corrections, the verified audit chain, the actor directory | one ready / blocked row per claim, an exit code | count an unverified chain, an unknown actor or a decision on another version |
@@ -137,7 +137,7 @@ The fourth line is the honest limit. This is a tamper-evident prototype, not imm
 
 | Control | Implemented here | Production design |
 |---|---|---|
-| Authenticated actors | No. A validated actor directory and per-action roles, but names are self-declared. | Actor from a single-sign-on token; the directory in the identity provider. |
+| Authenticated actors | No. A validated actor directory and per-action roles, but names are self-declared. The OS user who ran each append is recorded, which is not authentication either. | Actor from a single-sign-on token; the directory in the identity provider. |
 | Least-privilege append-only writes | Partly. The code only appends, refuses to append to a broken chain, and writes batches all or nothing; the file system does not enforce it. | One audit-writer service account with append-only permission; no one else can write. |
 | Retention-locked storage | No. A local JSONL file. | WORM storage (object lock in compliance mode) with a retention period. |
 | Independent trusted timestamps and head hashes | Partly. The anchor records count and head after every append, on the same machine; the team records heads outside it by hand and checks them with `--expect-count` / `--expect-head`. | Publish each head to a system the writer does not control: an RFC 3161 timestamping authority, or a separate ledger. |

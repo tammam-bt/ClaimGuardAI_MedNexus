@@ -5,7 +5,11 @@
 
 const ClaimViews = (function () {
   const SEARCH_INDEX = new WeakMap();
-  let lastOrder = CLAIMS.map((c) => c.claim.claim_id);
+  // The list a claim was last opened from, in the order it was shown: a
+  // claim's Previous / Next, its way back, and its "next open claim" follow
+  // it. Until a list is drawn, every claim, most urgent first.
+  let lastOrder = null;
+  let lastList = { key: "queue", id: null, href: href("queue") };
 
   function searchText(entry) {
     if (!SEARCH_INDEX.has(entry)) {
@@ -24,6 +28,9 @@ const ClaimViews = (function () {
   function decidedOf(entry, events) {
     return [Object.keys(Core.latestDecisions(entry, events)).length, Core.current(entry).route.reasons.length];
   }
+  // A claim with a finding nobody has decided yet (a draft counts).
+  function undecided(entry, events) { const [d, t] = decidedOf(entry, events); return d < t; }
+  lastOrder = CLAIMS.slice().sort(byUrgency).map((c) => c.claim.claim_id);
 
   function matches(entry, f, events) {
     if (f.q && !searchText(entry).includes(f.q.toLowerCase())) return false;
@@ -39,34 +46,47 @@ const ClaimViews = (function () {
     return true;
   }
 
+  // The claim's 15 checks as a fingerprint (its current version, as on the
+  // claim's own header), then its findings in words.
   function findingsCell(entry) {
     const fail = countOf(entry, "FAIL"), unable = countOf(entry, "UNABLE_TO_ASSESS"), ni = countOf(entry, "NOT_IMPLEMENTED");
-    if (!fail && !unable && !ni) return h("span", { class: "muted small", text: "None" });
-    return h("span", { class: "row" },
-      fail ? badge(`${fail} failed`, { tone: "fail", icon: Core.STATUS.FAIL.icon }) : null,
-      unable ? badge(`${unable} unable`, { tone: "unknown", icon: Core.STATUS.UNABLE_TO_ASSESS.icon }) : null,
-      ni ? badge(`${ni} not impl.`, { tone: "neutral", icon: Core.STATUS.NOT_IMPLEMENTED.icon }) : null);
+    const words = [fail ? `${fail} failed` : null, unable ? `${unable} unable` : null, ni ? `${ni} not impl.` : null].filter(Boolean);
+    return h("span", { class: "row row--tight" }, fingerprint(Core.current(entry).results, { size: "sm" }),
+      h("span", { class: "muted small", text: words.length ? words.join(" · ") : "None" }));
   }
 
-  // The claim table with its filters. opts: { pageKey, base (claims to list),
-  // params (from the URL), hide: [filter names to leave out] }
+  // The claim table with its filters. opts: { pageKey, pageId, base (claims
+  // to list), params (from the URL), hide: [filter names to leave out],
+  // defaultShow, onOrder(entries) to hear each new order }. The filters and
+  // the sort live in the address, so a reload, a link or Back keeps them.
   function list(opts) {
-    const f = Object.assign({ q: "", route: "", stage: "", flag: "", rule: "", show: opts.defaultShow || "" }, opts.params);
+    const f = Object.assign({ q: "", route: "", stage: "", flag: "", rule: "", sort: "", show: opts.defaultShow || "" }, opts.params);
     const hide = new Set(opts.hide || []);
     const base = opts.base.slice().sort(byUrgency);
     const holder = h("div");
     const count = h("span", { class: "filters__count", role: "status" });
+    const remember = () => {
+      const at = href(opts.pageKey, opts.pageId || null, f);
+      history.replaceState(null, "", at);
+      lastList = { key: opts.pageKey, id: opts.pageId || null, href: at };
+    };
 
     function draw() {
       const events = decisions();
       const rows = base.filter((e) => matches(e, f, events));
-      lastOrder = rows.map((e) => e.claim.claim_id);
       count.textContent = `${Core.number(rows.length)} of ${Core.plural(base.length, "claim")}`;
-      history.replaceState(null, "", href(opts.pageKey, opts.pageId || null, f));
+      remember();
       fill(holder, table({
-        caption: "Claims", rows,
+        caption: "Claims", rows, pageSize: 50,
+        sort: f.sort ? { key: f.sort.replace(/^-/, ""), dir: f.sort.startsWith("-") ? -1 : 1 } : null,
+        onOrder: (all, sort) => {
+          lastOrder = all.map((e) => e.claim.claim_id);
+          const s = sort ? `${sort.dir < 0 ? "-" : ""}${sort.key}` : "";
+          if (s !== f.sort) { f.sort = s; remember(); }
+          if (opts.onOrder) opts.onOrder(all);
+        },
         empty: emptyState({ icon: "search", title: "No claim matches", text: "Change or clear the filters." }),
-        onRowClick: (e) => go("claims", e.claim.claim_id),
+        rowHref: (e) => href("claims", e.claim.claim_id),
         columns: [
           { key: "claim", label: "Claim", sort: (e) => e.claim.claim_id, render: (e) => h("div", {},
             h("div", { class: "mono", text: e.claim.claim_id }), h("div", { class: "muted small", text: e.claim.patient_id })) },
@@ -113,7 +133,22 @@ const ClaimViews = (function () {
     return i < 0 ? [null, null] : [lastOrder[i - 1] || null, lastOrder[i + 1] || null];
   }
 
-  return { list, neighbours, countOf };
+  // The next claim in that list with a finding left to decide, after id
+  // and then from the top; null when there is none.
+  function nextOpen(id) {
+    const events = decisions();
+    const i = lastOrder.indexOf(id);
+    const order = i < 0 ? lastOrder : lastOrder.slice(i + 1).concat(lastOrder.slice(0, i));
+    return order.find((x) => x !== id && undecided(CLAIM_BY_ID.get(x), events)) || null;
+  }
+
+  // The way back to that list, with its filters: { href, label }.
+  function back() {
+    const page = PAGES.find((p) => p.key === lastList.key);
+    return { href: lastList.href, label: lastList.id || (lastList.key === "claims" ? "All claims" : page ? page.label : "All claims") };
+  }
+
+  return { list, neighbours, nextOpen, back, undecided, countOf, decidedOf };
 })();
 
 
@@ -355,6 +390,18 @@ const ClaimDetail = (function () {
       }
     }
 
+    // Every finding decided: the next claim of the list that still has one
+    // to decide is a link away (focused right after the last save).
+    function nextClaim() {
+      if (!finds.length || ClaimViews.undecided(entry, decisions())) return null;
+      const nextId = ClaimViews.nextOpen(id);
+      const link = nextId ? linkButton({ href: href("claims", nextId), label: `Next open claim: ${nextId}`, icon: "arrow-right", variant: "primary" }) : null;
+      if (link) link.id = "next-claim";
+      return callout({ tone: "pass", icon: "check-check", title: "Every finding on this claim is decided",
+        text: nextId ? "The next claim in your list with a finding left to decide:" : "No other claim in your list has a finding left to decide.",
+        body: link ? h("div", { class: "row" }, link) : null });
+    }
+
     function drawFinding() {
       const f = finds.find((x) => x.result.rule_id === st.selected);
       if (!f) {
@@ -383,7 +430,7 @@ const ClaimDetail = (function () {
           onDiscard: () => { discardDraft(entry, r.rule_id); p.action = null; p.reason = ""; changed(r.rule_id, "Draft discarded.", false); } }) });
       article.id = `finding-${r.rule_id}`;
       article.setAttribute("tabindex", "-1");
-      fill(findingHolder, article);
+      fill(findingHolder, nextClaim(), article);
       markEvidence(r);
     }
 
@@ -419,8 +466,11 @@ const ClaimDetail = (function () {
       }
       drawList();
       drawFinding();
-      announce.textContent = next ? `${message} Next: ${st.selected} ${ruleName(st.selected)}.` : message;
-      openFinding();
+      const onward = advance && !next ? document.getElementById("next-claim") : null;
+      announce.textContent = next ? `${message} Next: ${st.selected} ${ruleName(st.selected)}.`
+        : onward ? `${message} Every finding on this claim is decided. ${onward.textContent}.` : message;
+      if (onward) onward.focus();
+      else openFinding();
     }
 
     function move(step) {
@@ -513,6 +563,7 @@ const ClaimDetail = (function () {
     const c = cur.claim;
     const onVersion = cur.version > 1 ? ` on v${cur.version}` : "";
     const [prev, next] = ClaimViews.neighbours(id);
+    const back = ClaimViews.back();
     const headBadges = h("span", { class: "row row--tight" });
     const lifecycleHolder = h("div");
     const bannerHolder = h("div");
@@ -549,7 +600,7 @@ const ClaimDetail = (function () {
     return h("div", { class: "stack" },
       h("header", { class: "claim-head" },
         h("div", { class: "claim-head__title" },
-          linkButton({ href: href("claims"), label: "All claims", icon: "chevron-left", variant: "ghost" }),
+          linkButton({ href: back.href, label: back.label, icon: "chevron-left", variant: "ghost" }),
           h("h2", { text: c.claim_id }), headBadges, fingerprint(cur.results),
           h("div", { class: "row row--tight claim-head__nav" },
             prev ? linkButton({ href: href("claims", prev), label: "Previous", icon: "chevron-left" }) : null,

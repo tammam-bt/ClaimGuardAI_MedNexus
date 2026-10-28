@@ -3,7 +3,13 @@
 // page) and the start-up. Pages are drawn into .content only.
 
 const Shell = (function () {
+  // A reviewer's nav is shorter: their own pages, Review Queue first, and
+  // the run's pages one step away under "More". A convenience, not access
+  // control: every page stays open to both roles at its address.
+  const REVIEWER_NAV = ["queue", "claims", "rules", "settings"];
   const navLinks = new Map();
+  const nav = h("nav", { class: "nav", "aria-label": "Main" });
+  let navRole = null;
   const title = h("h1");
   const subtitle = h("p");
   const content = h("main", { class: "content", id: "content", tabindex: "-1" });
@@ -16,15 +22,32 @@ const Shell = (function () {
     return CLAIMS.filter((c) => Core.outcome(c, events) !== "ready").length;
   }
 
-  function sidebar() {
-    const nav = h("nav", { class: "nav", "aria-label": "Main" });
-    for (const page of PAGES.filter((p) => p.nav !== false)) {
-      const count = page.key === "queue" ? h("span", { class: "nav__count", "aria-label": "open claims" }) : null;
-      const link = h("a", { class: "nav__item", href: href(page.key) },
-        icon(page.icon), h("span", { class: "nav__label", text: page.label }), count);
-      navLinks.set(page.key, { link, count });
-      nav.appendChild(link);
+  function navLink(page) {
+    const count = page.key === "queue" ? h("span", { class: "nav__count", "aria-label": "open claims" }) : null;
+    const link = h("a", { class: "nav__item", href: href(page.key) },
+      icon(page.icon), h("span", { class: "nav__label", text: page.label }), count);
+    navLinks.set(page.key, { link, count });
+    return link;
+  }
+  // Drawn again only when the role changes.
+  function drawNav() {
+    if (navRole === State.role) return;
+    navRole = State.role;
+    navLinks.clear();
+    const pages = PAGES.filter((p) => p.nav !== false);
+    if (State.role === "admin") {
+      fill(nav, pages.map(navLink));
+    } else {
+      const more = pages.filter((p) => !REVIEWER_NAV.includes(p.key));
+      fill(nav, REVIEWER_NAV.map((k) => pages.find((p) => p.key === k)).filter(Boolean).map(navLink),
+        more.length ? h("details", { class: "nav__more" },
+          h("summary", { class: "nav__item" }, icon("chevron-down"), h("span", { class: "nav__label", text: "More" })),
+          h("div", { class: "nav__group" }, more.map(navLink))) : null);
     }
+    refreshUser();
+  }
+
+  function sidebar() {
     return h("aside", { class: "sidebar" },
       h("div", { class: "brand" }, icon("logo"),
         h("div", {}, h("div", { class: "brand__name", text: "ClaimGuard AI" }),
@@ -75,18 +98,24 @@ const Shell = (function () {
       h("div", { class: "main" },
         h("header", { class: "topbar" }, h("div", { class: "topbar__title" }, title, subtitle), topbarSearch(), roleSwitch()),
         content));
-    refreshUser();
+    drawNav();
     State.onChange(refreshUser);
     window.addEventListener("hashchange", render);
   }
 
   function render() {
     closePanel();
+    drawNav();
     const route = parseRoute();
-    const page = PAGES.find((p) => p.key === route.key) || PAGES.find((p) => p.key === "dashboard");
+    const page = PAGES.find((p) => p.key === route.key) || PAGES.find((p) => p.key === homePage());
     if (current !== page.key) window.scrollTo(0, 0);
     current = page.key;
-    for (const [key, { link }] of navLinks) link.setAttribute("aria-current", key === page.key ? "page" : "false");
+    for (const [key, { link }] of navLinks) {
+      link.setAttribute("aria-current", key === page.key ? "page" : "false");
+      // The page on screen is never hidden in a closed "More".
+      const more = link.closest(".nav__more");
+      if (more && key === page.key) more.open = true;
+    }
     title.textContent = page.label;
     subtitle.textContent = page.subtitle;
     document.title = `${page.label} | ClaimGuard AI`;

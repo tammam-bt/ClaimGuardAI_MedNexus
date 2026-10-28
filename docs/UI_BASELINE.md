@@ -134,3 +134,23 @@ Measured with the same script on the same machine, back to back with this baseli
 | 10 | Nothing announces a saved draft | Announced on the claim page ("Draft saved for R003. Next: R004 …"). |
 
 Render time is unchanged: first frame 77–98 ms against 80–97 ms for this baseline, the claim page 20–21 ms against 21–23 ms. P2 closed 13 (dark theme). Still open: 1 (375 px, P7); 3 for the Queue and Claims tables, 9 and 12 (P4); 7 and 11 (heading levels, tab keys); 14 (P5).
+
+## 8. Progress after P4
+
+Measured with the same script, P4 against the P3 build of the same run, back to back, three rounds each (medians of 9 runs per round). This machine was slower than on the P1 day for both builds, so compare the two columns, not either one with section 2.
+
+| # | Finding | After P4 (`mak/p4-queue-nav`) |
+|---|---|---|
+| 3 | One tab stop per row | Every table that opens something is one tab stop. Its first cell holds a real link (or a button, for a table that opens a panel), so a screen reader announces the action. ↑ ↓ or j / k move, Home and End jump, Enter or Space opens, and one Tab leaves the table. Tab stops on the Queue page: 32, were 120 or more (the walk stops at 120); Claims 29; Rules 16, were 32. |
+| 6 | The Queue spends a stat card on drafts | The drafts card is gone; drafts show in the same banner as on Claims. The fourth card is "Not started", a link to that filter. The Queue's first action is "Next to decide": the first claim of the list, as filtered and sorted, with a finding left to decide. |
+| 9 | Eleven stops before the content | A reviewer's nav is Review Queue, Claims, Rules and Settings, with Dashboard, Audit Logs and Evaluation under "More" (one stop while closed, opened on its own pages). The content is now stop 10 on the Queue, Claims and Rules, was 12. An administrator keeps all seven links. It is a convenience, not access control: every page opens at its address for both roles. |
+| 12 | Lists draw every row | A claim list draws 50 rows and a "Show 50 more" button (other tables 100). Queue: 2,455 elements, next frame 55–87 ms, against 7,148 and 141–248 ms for P3. Claims: 2,398 elements, 46–62 ms, against 10,244 and 166–320 ms. |
+
+Also in P4:
+
+- **Home page.** An address without a page opens the Review Queue for a reviewer and the dashboard for an administrator.
+- **Fingerprint rows.** Queue and Claims rows show the claim's 15 checks as a fingerprint (its current version, as on the claim header), then the findings in words.
+- **Filters and sort in the address.** The sort joins the filters (`?route=REVIEW&sort=-total`), so a reload, a shared link or Back keeps both. A claim's Previous / Next follow the order on screen, sort included (before, a column sort did not reach them), and its back link returns to the list it came from with its filters ("Review Queue", "All claims" or the rule).
+- **Next open claim.** When the last finding of a claim is decided, the finding pane says so and the focus moves to "Next open claim: CG-…", the next claim of that list with a finding left to decide (from the top again after the end). The e2e test checks it.
+
+First frame is unchanged within the noise: 122–221 ms for P4 against 139–193 ms for P3 in the same rounds; the claim page 21–23 ms against 22–38 ms. Still open: 1 (375 px, P7); 7 and 11 (heading levels, tab keys); 14 (P5).

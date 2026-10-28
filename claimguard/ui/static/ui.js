@@ -229,11 +229,27 @@ function statusBars(counts) {
 
 // ------------------------------------------------------------------- table
 // columns: [{ key, label, num, sort: row => value, render: row => node }]
+// A row that opens something (rowHref: row => address, or onRowClick: row =>
+// action) carries it in its first cell, as a link or a button, so a screen
+// reader announces it; the whole row stays one target for the mouse. The
+// table is one tab stop: the arrow keys or j / k move between rows, Home and
+// End jump, Enter or Space opens. A long table draws pageSize rows (100 by
+// default) and a button for more. sort: { key, dir } to start sorted;
+// onOrder(rows, sort) hears every draw with all the rows in their order.
 function table(opts) {
   const o = opts;
   let sortKey = o.sort ? o.sort.key : null;
   let sortDir = o.sort ? o.sort.dir : 1;
-  const tbody = h("tbody");
+  const opens = !!(o.rowHref || o.onRowClick);
+  const pageSize = o.pageSize || 100;
+  let shown = pageSize;
+  let active = 0;   // the row whose link is the table's one tab stop
+  let links = [];
+  const tbody = h("tbody", { onKeydown: onKey, onFocusin: (e) => {
+    const i = links.indexOf(e.target);
+    if (i >= 0 && i !== active) { links[active].tabIndex = -1; active = i; e.target.tabIndex = 0; }
+  } });
+  const foot = h("div", { class: "table-foot" });
   const wrap = h("div", { class: "table-wrap" });
 
   function rows() {
@@ -244,28 +260,73 @@ function table(opts) {
       return (x < y ? -1 : x > y ? 1 : 0) * sortDir;
     });
   }
+  function opener(row, i, content) {
+    const props = { class: "row-link", tabindex: i === active ? "0" : "-1" };
+    return o.rowHref
+      ? h("a", Object.assign(props, { href: o.rowHref(row) }), content)
+      : h("button", Object.assign(props, { type: "button", onClick: () => o.onRowClick(row) }), content);
+  }
   function draw() {
-    tbody.replaceChildren(...rows().map((row) => {
-      const tr = h("tr", {
-        class: o.onRowClick ? "is-clickable" : null,
+    const all = rows();
+    const visible = all.slice(0, shown);
+    active = Math.min(active, visible.length - 1);
+    links = [];
+    tbody.replaceChildren(...visible.map((row, i) => {
+      const cells = o.columns.map((c, n) => {
+        const content = c.render ? c.render(row) : row[c.key];
+        return h("td", { class: c.num ? "num" : null }, opens && n === 0 ? opener(row, i, content) : content);
+      });
+      if (opens) links.push(cells[0].firstChild);
+      return h("tr", {
+        class: opens ? "is-clickable" : null,
         "aria-selected": o.selected && o.selected(row) ? "true" : null,
-        tabindex: o.onRowClick ? "0" : null,
-        onClick: o.onRowClick ? () => o.onRowClick(row) : null,
-        onKeydown: o.onRowClick ? (e) => { if (e.key === "Enter") o.onRowClick(row); } : null,
-      }, o.columns.map((c) => h("td", { class: c.num ? "num" : null }, c.render ? c.render(row) : row[c.key])));
-      return tr;
+        // A click anywhere on the row opens it, except on a control of its own.
+        onClick: opens ? (e) => { if (!e.target.closest("a, button, input, select, textarea, summary")) links[i].click(); } : null,
+      }, cells);
     }));
     head.querySelectorAll("th").forEach((th) => {
       th.setAttribute("aria-sort", th.dataset.key === sortKey ? (sortDir === 1 ? "ascending" : "descending") : "none");
     });
+    const more = all.length - visible.length;
+    fill(foot,
+      opens && visible.length > 1 ? h("span", { text: "↑ ↓ or j / k to move · Enter to open" }) : null,
+      more > 0 ? h("span", { class: "row" }, `Showing ${Core.number(visible.length)} of ${Core.number(all.length)}`,
+        button({ label: `Show ${Core.number(Math.min(more, pageSize))} more`, onClick: () => {
+          const first = shown;
+          shown += pageSize;
+          draw();
+          // The keyboard carries on from the first new row.
+          if (links[first]) focusRow(first);
+        } })) : null);
+    foot.hidden = !foot.firstChild;
+    if (o.onOrder) o.onOrder(all, sortKey ? { key: sortKey, dir: sortDir } : null);
+  }
+  function focusRow(i) {
+    links[active].tabIndex = -1;
+    active = i;
+    links[i].tabIndex = 0;
+    links[i].focus();
+  }
+  function onKey(e) {
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    const i = links.indexOf(e.target);
+    if (i < 0) return;
+    if (e.key === " ") { e.preventDefault(); e.target.click(); return; }
+    const to = { ArrowDown: i + 1, j: i + 1, ArrowUp: i - 1, k: i - 1, Home: 0, End: links.length - 1 }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    focusRow(Math.max(0, Math.min(links.length - 1, to)));
   }
   const head = h("thead", {}, h("tr", {}, o.columns.map((c) => h("th", { class: c.num ? "num" : null, "data-key": c.key, scope: "col" },
-    c.sort ? h("button", { type: "button", onClick: () => { sortDir = sortKey === c.key ? -sortDir : 1; sortKey = c.key; draw(); } },
+    c.sort ? h("button", { type: "button", onClick: () => { sortDir = sortKey === c.key ? -sortDir : 1; sortKey = c.key; active = 0; draw(); } },
       c.label, icon("sort", { size: "sm" })) : c.label))));
-  if (!o.rows.length) return o.empty || emptyState({ icon: "search", title: "Nothing to show", text: "No row matches." });
+  if (!o.rows.length) {
+    if (o.onOrder) o.onOrder([], null);
+    return o.empty || emptyState({ icon: "search", title: "Nothing to show", text: "No row matches." });
+  }
   wrap.appendChild(h("table", { class: "table" }, h("caption", { class: "sr-only", text: o.caption || "" }), head, tbody));
   draw();
-  return wrap;
+  return h("div", {}, wrap, foot);
 }
 
 // --------------------------------------------------------------- filters
@@ -673,13 +734,16 @@ function download(filename, text) {
 const PAGES = [];
 function registerPage(page) { PAGES.push(page); }
 
+// The page an address without a page opens: the Review Queue for a
+// reviewer, the dashboard for an administrator.
+function homePage() { return State.role === "admin" ? "dashboard" : "queue"; }
 function parseRoute() {
-  const raw = (location.hash || "#/dashboard").replace(/^#\/?/, "");
+  const raw = (location.hash || `#/${homePage()}`).replace(/^#\/?/, "");
   const [path, query] = raw.split("?");
   const parts = path.split("/").map(decodeURIComponent);
   const params = {};
   new URLSearchParams(query || "").forEach((v, k) => { params[k] = v; });
-  return { key: parts[0] || "dashboard", id: parts[1] || null, params };
+  return { key: parts[0] || homePage(), id: parts[1] || null, params };
 }
 function href(key, id, params) {
   const q = params ? new URLSearchParams(Object.entries(params).filter(([, v]) => v !== "" && v !== null && v !== undefined)).toString() : "";

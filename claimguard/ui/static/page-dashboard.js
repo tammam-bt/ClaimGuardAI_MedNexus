@@ -104,7 +104,7 @@ const Dashboard = (function () {
 
   function scrollTo(id) {
     const el = document.getElementById(id);
-    if (el) { el.setAttribute("tabindex", "-1"); el.scrollIntoView({ behavior: "smooth", block: "start" }); el.focus({ preventScroll: true }); }
+    if (el) { el.setAttribute("tabindex", "-1"); el.scrollIntoView({ behavior: scrollBehavior(), block: "start" }); el.focus({ preventScroll: true }); }
   }
 
   function render(route) {
@@ -119,7 +119,7 @@ const Dashboard = (function () {
     // "Rejected at ingestion" links here with ?focus=rejected.
     if (route && route.params.focus === "rejected") queueMicrotask(() => scrollTo("sec-rejected"));
 
-    return h("div", { class: "stack" },
+    return h("div", { class: "stack stagger" },
       statRow([
         statCard({ icon: "inbox", tone: "unknown", label: "Routed for review", value: Core.number(routed),
           caption: `${Core.number(open)} still open`, source: FROM.routes, href: href("queue") }),

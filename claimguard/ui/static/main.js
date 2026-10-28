@@ -15,6 +15,7 @@ const Shell = (function () {
   const content = h("main", { class: "content", id: "content", tabindex: "-1" });
   const userBlock = h("div", { class: "sidebar__user" });
   let current = null;
+  let currentPath = null;
   let firstRender = true;
 
   function openCount() {
@@ -103,10 +104,21 @@ const Shell = (function () {
     window.addEventListener("hashchange", render);
   }
 
+  // A new page fades in (.page-enter). It is drawn at once, never a frame
+  // later: a View Transition would defer the swap, and while it ran the page
+  // scrolled sideways by a scrollbar's width. Not on first load, not when
+  // the same page is drawn again (a role switch), never with reduced motion.
   function render() {
     closePanel();
     drawNav();
     const route = parseRoute();
+    const path = `${route.key}/${route.id || ""}`;
+    const fade = !firstRender && path !== currentPath && !reducedMotion();
+    currentPath = path;
+    draw(route, fade);
+  }
+
+  function draw(route, fade) {
     const page = PAGES.find((p) => p.key === route.key) || PAGES.find((p) => p.key === homePage());
     if (current !== page.key) window.scrollTo(0, 0);
     current = page.key;
@@ -126,6 +138,7 @@ const Shell = (function () {
       console.error(err);
       body = emptyState({ icon: "alert-triangle", title: "This page could not be drawn", text: String(err && err.message || err) });
     }
+    if (fade) body.classList.add("page-enter");
     content.replaceChildren(body);
     // After a navigation (not on first load), move focus to the new content
     // so keyboard and screen-reader users land on it.

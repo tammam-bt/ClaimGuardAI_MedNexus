@@ -35,6 +35,8 @@ Breakpoints: `--bp-md` 768, `--bp-lg` 1100, `--bp-xl` 1360 px. A media query can
 | `test_ui_core.test_colors_live_only_in_the_tokens` | No colour outside the four token blocks |
 | `test_ui_core.test_type_layers_and_motion_come_from_tokens` | Every font family, size, weight, line height, z-index and transition duration is a token |
 | `test_ui_core.test_media_queries_use_the_breakpoint_tokens` | Every `@media` width is a breakpoint token |
+| `test_ui_core.test_motion_is_short_and_moves_transform_and_opacity_only` | Every keyframe moves transform and opacity only; every animation duration and delay is a token; no fill leaves a transform behind; the longest staggered entrance ends by 300 ms |
+| `test_ui_core.test_reduced_motion_turns_it_all_off` | Reduced motion zeroes durations and delays; no script scrolls smoothly without asking first |
 
 Lowest contrast in each theme, from the stylesheet:
 
@@ -63,7 +65,24 @@ All are in `ui.js` and take their state as arguments. P3 wires them into the cla
 | `openPanel(title, body)` | The drawer, a modal side panel: focus moves in and stays, Escape closes it, focus returns to the opener. | Opens from a button |
 | `table({ rowHref \| onRowClick, pageSize, sort, onOrder })` | A table whose rows open something (P4). The first cell holds a real link (`rowHref`) or button (`onRowClick`), so a screen reader announces the action; a click anywhere on the row opens it. The whole table is one tab stop: ↑ ↓ or j / k move, Home and End jump, Enter or Space opens. It draws `pageSize` rows (100 by default, 50 for claims) and a "Show more" button that hands the keyboard to the first new row. `onOrder` hears each draw with all rows in their order, which the claim lists use to keep the sort in the address and the claim page's Previous / Next in step. | Sample claims, opening a panel |
 
-## 5. Checked on which systems
+## 5. Motion (P6)
+
+Motion says what changed and where to look; it never decorates. Tokens: `--duration-fast` 120 ms, `--duration-base` 200 ms, `--duration-slow` 280 ms, `--stagger` 25 ms, `--ease-standard`, `--ease-enter`.
+
+| Where | What moves | How long |
+|---|---|---|
+| Between pages | The new page fades in, drawn at once | 200 ms |
+| Dashboard | Its sections rise in, 25 ms apart (three steps at most) | ends by 275 ms |
+| Claim workspace | The chosen finding slides into its pane | 200 ms |
+| Evidence thread | A line draws itself under the field a chip points at | 280 ms |
+| Saved draft | Its state pops once in the findings list | 280 ms |
+| Drawer | Slides in over a fading backdrop | 280 ms / 200 ms |
+
+Rules: transform and opacity only; fills are `backwards`, so a finished animation leaves no transform behind (a transform would trap fixed and sticky children); `prefers-reduced-motion` turns every one off, and scripts call `scrollBehavior()` before a smooth scroll. Colour changes on hover and selection stay 120 ms fades.
+
+The plan asked for View Transitions where the browser has them. They were tried and dropped: a View Transition draws the new page a frame later, so a script reading the page right after a navigation (the e2e tests) saw the old one, and while it ran every page scrolled sideways by a scrollbar's width. The fade gives the same effect with the page drawn at once.
+
+## 6. Checked on which systems
 
 System fonts change the face, not the scale. Checked so far:
 

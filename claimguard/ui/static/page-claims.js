@@ -232,7 +232,7 @@ const ClaimDetail = (function () {
 
   function scrollToId(id) {
     const el = document.getElementById(id);
-    if (el) { el.setAttribute("tabindex", "-1"); el.scrollIntoView({ behavior: "smooth", block: "start" }); el.focus({ preventScroll: true }); }
+    if (el) { el.setAttribute("tabindex", "-1"); el.scrollIntoView({ behavior: scrollBehavior(), block: "start" }); el.focus({ preventScroll: true }); }
   }
 
   function resultPanel(entry, r) {
@@ -386,7 +386,7 @@ const ClaimDetail = (function () {
       if (st.active) {
         const hit = targets(pane, st.active);
         hit.forEach((el) => el.classList.add("is-thread"));
-        if (hit[0]) hit[0].scrollIntoView({ behavior: "smooth", block: "nearest" });
+        if (hit[0]) hit[0].scrollIntoView({ behavior: scrollBehavior(), block: "nearest" });
       }
     }
 
@@ -466,6 +466,9 @@ const ClaimDetail = (function () {
       }
       drawList();
       drawFinding();
+      // A stored draft pops once in the list, where the eye goes next.
+      const saved = advance ? listHolder.querySelector(`[data-rule="${rule}"] .ws-item__state`) : null;
+      if (saved) saved.classList.add("is-saved");
       const onward = advance && !next ? document.getElementById("next-claim") : null;
       announce.textContent = next ? `${message} Next: ${st.selected} ${ruleName(st.selected)}.`
         : onward ? `${message} Every finding on this claim is decided. ${onward.textContent}.` : message;
@@ -591,7 +594,7 @@ const ClaimDetail = (function () {
     const pick = (rule) => {
       const el = document.getElementById(`opt-${rule}`);
       if (!el) return;
-      document.getElementById("sec-findings").scrollIntoView({ behavior: "smooth", block: "start" });
+      document.getElementById("sec-findings").scrollIntoView({ behavior: scrollBehavior(), block: "start" });
       el.click();
     };
     const counts = Core.statusCounts(cur.results);

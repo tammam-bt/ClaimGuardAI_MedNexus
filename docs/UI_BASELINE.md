@@ -169,3 +169,11 @@ The dashboard is now a command center, with the run's eight-stage life cycle sti
 Nothing was added that the data cannot hold: no turnaround, trend or workload per reviewer.
 
 Render time: the dashboard's next frame is 34–44 ms against 25–33 ms for P4 in the same rounds, from the extra bars and cards. First frame (the dashboard, cold) 121–151 ms against 107–230 ms, within this machine's noise today. Sideways scroll is 0 px at 768, 1280 and 1440 px; 375 px is still P7. Still open: 1 (375 px, P7); 7 and 11 (heading levels, tab keys).
+
+## 10. Progress after P6
+
+Purposeful motion, as set out in `docs/DESIGN_SYSTEM.md` section 5: a fade between pages, the dashboard's sections rising in three short steps, a finding sliding into its pane, the evidence thread drawing itself, a saved draft popping in the findings list, and the drawer sliding in. Nothing runs past 300 ms, keyframes move transform and opacity only, and reduced motion turns all of it off (the e2e test checks both, in a real browser).
+
+View Transitions, which the plan suggested, were dropped: they draw the new page a frame late, and while one ran every page scrolled sideways by 15 px, a scrollbar's width.
+
+Measured as before, P6 against the P5 build, three rounds back to back: first frame 143–222 ms against 134–203 ms, the dashboard 30–37 ms against 33–36 ms, the Queue 63–100 ms against 84–91 ms, all within this machine's noise; the claim page 25–35 ms against 23–25 ms, a few ms for the sliding finding. Sideways scroll unchanged: 0 px at 768, 1280 and 1440 px; 375 px is P7.

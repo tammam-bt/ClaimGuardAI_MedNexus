@@ -134,6 +134,40 @@ class ConsistencyTests(unittest.TestCase):
             for value in re.findall(r"(?<![a-z-])transition\s*:\s*([^;]+)", body):
                 self.assertNotRegex(value, r"\d+m?s", f"{selector}: a duration that is not a token")
 
+    def test_motion_is_short_and_moves_transform_and_opacity_only(self):
+        # P6: every keyframe moves transform and opacity only, every
+        # animation's duration and delay is a token, no fill leaves a
+        # transform behind, and the longest staggered entrance ends by 300 ms.
+        css = re.sub(r"/\*.*?\*/", "", (STATIC / "app.css").read_text(encoding="utf-8"), flags=re.S)
+        keyframes = re.findall(r"@keyframes\s+([a-z-]+)\s*\{((?:[^{}]*\{[^{}]*\})*)[^{}]*\}", css)
+        self.assertGreaterEqual(len(keyframes), 5)
+        for name, body in keyframes:
+            for prop in re.findall(r"([a-z-]+)\s*:", body):
+                self.assertIn(prop, ("transform", "opacity"), f"@keyframes {name} animates {prop}")
+        names = {name for name, _ in keyframes}
+        for selector, body in css_rules():
+            if selector.startswith(":root") or selector in ("from", "to"):
+                continue
+            for value in re.findall(r"(?<![a-z-])animation\s*:\s*([^;]+)", body):
+                self.assertNotRegex(value, r"(?<![a-z-])\d+m?s", f"{selector}: a duration that is not a token")
+                self.assertNotRegex(value, r"\b(both|forwards)\b", f"{selector}: a fill that leaves the end state behind")
+                self.assertIn(value.split()[0], names | {"none"}, selector)
+            for value in re.findall(r"(?<![a-z-])animation-delay\s*:\s*([^;]+)", body):
+                self.assertRegex(value.strip(), r"^(var\(--stagger\)|calc\(var\(--stagger\) \* [0-9]\)|0s !important)$", selector)
+        ms = {k: int(v) for k, v in re.findall(r"--(duration-[a-z]+|stagger):\s*(\d+)ms", css)}
+        self.assertTrue(all(v <= 300 for k, v in ms.items() if k.startswith("duration")), ms)
+        steps = max(int(n) for n in re.findall(r"calc\(var\(--stagger\) \* ([0-9])\)", css))
+        self.assertLessEqual(steps * ms["stagger"] + ms["duration-base"], 300)
+
+    def test_reduced_motion_turns_it_all_off(self):
+        css = (STATIC / "app.css").read_text(encoding="utf-8")
+        block = re.search(r"@media \(prefers-reduced-motion: reduce\) \{(.*?)\n\}", css, re.S).group(1)
+        for prop in ("transition-duration: 0.01ms !important", "animation-duration: 0.01ms !important", "animation-delay: 0s !important"):
+            self.assertIn(prop, block)
+        # Scripts ask before a smooth scroll.
+        for path in STATIC.glob("*.js"):
+            self.assertNotIn('behavior: "smooth"', path.read_text(encoding="utf-8"), path.name)
+
     def test_media_queries_use_the_breakpoint_tokens(self):
         css = (STATIC / "app.css").read_text(encoding="utf-8")
         breakpoints = set(re.findall(r"--bp-[a-z]+:\s*(\d+px);", css))

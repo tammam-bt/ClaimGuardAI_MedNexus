@@ -91,7 +91,10 @@
 
   --duration-fast: 120ms;
   --duration-base: 200ms;
+  --duration-slow: 280ms;   /* the longest motion: nothing runs past about 300 ms */
+  --stagger:       25ms;    /* between entering sections; three steps at most */
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-enter:    cubic-bezier(0, 0, 0, 1);
 
   --z-dropdown: 100;
   --z-sticky:   200;
@@ -335,8 +338,30 @@ code, kbd, pre, samp, .mono { font-family: var(--font-mono); font-size: var(--fo
 [hidden] { display: none !important; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+  *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-delay: 0s !important; }
 }
+
+/* ------------------------------------------------------------------ motion */
+/* Purposeful motion only (P6): a page fades in, the dashboard enters in
+   three short steps, a finding slides into its pane, the drawer slides in,
+   the evidence thread draws itself, a saved draft pops. Every keyframe moves
+   transform and opacity only, every duration is a token, and reduced motion
+   turns it all off (above). Fills are "backwards": once done, an animation
+   leaves no transform behind. */
+@keyframes fade-in  { from { opacity: 0; } }
+@keyframes rise     { from { opacity: 0; transform: translateY(6px); } }
+@keyframes slide-in { from { opacity: 0; transform: translateX(12px); } }
+@keyframes draw     { from { transform: scaleX(0); } }
+@keyframes pop      { from { opacity: 0.4; transform: scale(0.92); } }
+
+/* between pages: the new page fades in, drawn at once (main.js) */
+.page-enter { animation: fade-in var(--duration-base) var(--ease-enter) backwards; }
+
+/* the dashboard's sections, one after another */
+.stagger > * { animation: rise var(--duration-base) var(--ease-enter) backwards; }
+.stagger > :nth-child(2) { animation-delay: var(--stagger); }
+.stagger > :nth-child(3) { animation-delay: calc(var(--stagger) * 2); }
+.stagger > :nth-child(n+4) { animation-delay: calc(var(--stagger) * 3); }
 
 /* ------------------------------------------------------------------ icons */
 .icon {
@@ -562,12 +587,13 @@ a.stat { color: inherit; text-decoration: none; }
 .tab__count { padding: 0 var(--space-2); border-radius: var(--radius-full); background: var(--color-surface-strong); font-size: var(--text-xs); }
 
 /* -------------------------------------------------------------- side panel */
-.panel-backdrop { position: fixed; inset: 0; z-index: var(--z-modal); background: var(--color-overlay); }
+.panel-backdrop { position: fixed; inset: 0; z-index: var(--z-modal); background: var(--color-overlay); animation: fade-in var(--duration-base) var(--ease-enter) backwards; }
 .panel {
   position: fixed; top: 0; right: 0; bottom: 0; z-index: var(--z-modal);
   width: var(--panel-w); max-width: 100vw;
   display: flex; flex-direction: column;
   background: var(--color-surface-raised); border-left: 1px solid var(--color-border); box-shadow: var(--shadow-lg);
+  animation: slide-in var(--duration-slow) var(--ease-enter) backwards;
 }
 .panel__head { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--color-border); }
 .panel__title { flex: 1; font-size: var(--text-base); font-weight: var(--weight-semibold); }
@@ -752,6 +778,8 @@ button.timeline__body:hover .small { text-decoration: underline; }
 .ws-item__state { font-size: var(--text-xs); color: var(--color-text-muted); }
 .ws-item__state.is-draft { color: var(--color-success); font-weight: var(--weight-semibold); }
 .ws-item__state.is-logged { color: var(--color-info); font-weight: var(--weight-semibold); }
+.ws-item__state.is-saved { display: inline-block; transform-origin: left center; animation: pop var(--duration-slow) var(--ease-enter) backwards; }
+.ws-pane--finding > .finding-block { animation: slide-in var(--duration-base) var(--ease-enter) backwards; }
 /* two actions a row in a narrow pane, all four when the panel has room */
 .decision-panel { container-type: inline-size; }
 .decision-panel__actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }
@@ -762,7 +790,12 @@ button.timeline__body:hover .small { text-decoration: underline; }
 .ws-pane--claim .kv { grid-template-columns: minmax(6rem, max-content) minmax(0, 1fr); }
 /* the evidence thread: every field the finding cites, and the one asked for */
 .is-cited { background: var(--color-primary-subtle); border-radius: var(--radius-sm); box-shadow: 0 0 0 3px var(--color-primary-subtle); }
-.is-thread { outline: var(--focus-ring-width) solid var(--color-primary); outline-offset: 3px; }
+.is-thread { position: relative; outline: var(--focus-ring-width) solid var(--color-primary); outline-offset: 3px; }
+.is-thread::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -6px; height: var(--focus-ring-width);
+  background: var(--color-primary); transform-origin: left center;
+  animation: draw var(--duration-slow) var(--ease-standard) backwards;
+}
 .stack--tight { gap: var(--space-2); }
 .plain-list { margin: var(--space-2) 0 0; padding-left: var(--space-5); }
 .claim-head__title .fingerprint { margin-left: var(--space-2); }

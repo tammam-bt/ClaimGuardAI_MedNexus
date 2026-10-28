@@ -56,6 +56,12 @@ function applyTheme() {
   else document.documentElement.dataset.theme = State.theme;
 }
 
+// Motion: short, and none at all for a viewer who asks for less
+// (prefers-reduced-motion). CSS turns its own animations off; scripts ask
+// here before a View Transition or a smooth scroll.
+function reducedMotion() { return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); }
+function scrollBehavior() { return reducedMotion() ? "auto" : "smooth"; }
+
 // Review decisions already in the audit chain, then this viewer's drafts.
 const RECORDED = DATA.audit
   ? DATA.audit.events.map((row) => row.event).filter((e) => e && e.event === "review_decision")

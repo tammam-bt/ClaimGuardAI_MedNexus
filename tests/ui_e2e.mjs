@@ -229,6 +229,25 @@ try {
   await sleep(100);
   out.dashboard.focusRejected = await evaluate("document.activeElement.id");
 
+  // ---- motion: the animations running one frame after a navigation, then
+  // the same with reduced motion asked for
+  const ANIMS_AFTER = (hash) => `(async () => {
+    const changed = new Promise((r) => addEventListener('hashchange', r, { once: true }));
+    location.hash = ${JSON.stringify(hash)};
+    await changed;
+    await new Promise((r) => requestAnimationFrame(() => r()));
+    return { pageEnter: !!document.querySelector('.content > .page-enter'),
+      anims: document.getAnimations().map((a) => ({ name: a.animationName || 'transition ' + a.transitionProperty, on: (a.effect.target.className || a.effect.target.tagName || '') + (a.effect.pseudoElement || ''), end: Math.round(a.effect.getComputedTiming().endTime) })) };
+  })()`;
+  await goTo("#/queue");
+  out.motion = { dashboard: await evaluate(ANIMS_AFTER("#/dashboard")) };
+  await goTo("#/claims/CG-785C09BD9CC8");
+  out.motion.claim = await evaluate(ANIMS_AFTER("#/rules"));
+  await page("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+  await goTo("#/queue");
+  out.motion.reduced = await evaluate(ANIMS_AFTER("#/dashboard"));
+  await page("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
+
   // ---- audit: the role decides which events show
   await goTo("#/audit");
   out.audit = { reviewer: { count: await text(".filters__count"), page: await text(".content") } };
@@ -308,6 +327,16 @@ try {
   // Tab to the findings list, j/k to move, Enter to open, Tab to an action,
   // Space to press it, type the reason, Tab to Save, Enter; Dismiss asks once
   // more, with the focus on "Yes, dismiss".
+  // The evidence thread draws itself under the field a chip points at.
+  out.motion.thread = await evaluate(`(async () => {
+    const chip = document.querySelector('#finding-R003 .chip');
+    chip.click();
+    await new Promise((r) => requestAnimationFrame(() => r()));
+    const names = document.getAnimations().map((a) => a.animationName || 'transition ' + a.transitionProperty);
+    chip.click();
+    return names;
+  })()`);
+
   out.kb = {};
   await evaluate("document.getElementById('content').focus()");
   out.kb.tabsToList = await tabUntil("el.getAttribute('role') === 'option'");
@@ -335,7 +364,8 @@ try {
   };
 
   out.kb.first = await decide("R003", "Dismiss with reason", "Coverage extension confirmed by the payer.", "Reviewer 01");
-  out.afterOne = { head: await text(".claim-head__title"), lifecycle: await text(".lifecycle"), count: await text(".nav__count") };
+  out.afterOne = { head: await text(".claim-head__title"), lifecycle: await text(".lifecycle"), count: await text(".nav__count"),
+    saved: await evaluate("(document.querySelector('.ws-item__state.is-saved') || {}).parentElement?.dataset.rule || null") };
   out.kb.second = await decide("R004", "Dismiss with reason", "Member record corrected upstream.");
   out.afterTwo = { head: await text(".claim-head__title"), count: await text(".nav__count"), next: await text("#next-claim") };
   out.drafts = await evaluate(`JSON.parse(localStorage.getItem('claimguard.drafts.' + JSON.parse(document.getElementById('claimguard-data').textContent).run.run_id))`);

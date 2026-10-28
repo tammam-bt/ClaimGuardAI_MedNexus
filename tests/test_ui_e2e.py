@@ -231,6 +231,24 @@ class EndToEndTests(unittest.TestCase):
             self.assertNotIn(gone, e["page"])
         self.assertEqual(self.out["hostile"]["mismatchRows"], 1)
 
+    def test_motion_is_short_and_off_with_reduced_motion(self):
+        m = self.out["motion"]
+        names = {a["name"] for a in m["dashboard"]["anims"]}
+        self.assertTrue(m["dashboard"]["pageEnter"])          # the new page fades in
+        self.assertIn("rise", names)                           # the dashboard enters in steps
+        self.assertTrue(all(a["end"] <= 300 for a in m["dashboard"]["anims"]), m["dashboard"]["anims"])
+        self.assertTrue(m["claim"]["pageEnter"])
+        self.assertIn("draw", m["thread"])                     # the evidence thread draws itself
+        self.assertEqual(self.out["afterOne"]["saved"], "R003")  # a saved draft pops in the list
+        # Reduced motion: no fade, and no motion that lasts. Colour fades are
+        # not motion; and a link inside a closed "More" keeps the style it had
+        # when the test switched the setting, until it shows (Chrome).
+        self.assertFalse(m["reduced"]["pageEnter"])
+        moving = [a for a in m["reduced"]["anims"] if not a["name"].startswith("transition ")
+                  or a["name"] in ("transition transform", "transition opacity")]
+        self.assertTrue(moving)
+        self.assertTrue(all(a["end"] <= 1 for a in moving), moving)
+
     def test_review_queue(self):
         o = self.out
         self.assertEqual(o["queueBefore"]["count"], "264 of 264 claims")

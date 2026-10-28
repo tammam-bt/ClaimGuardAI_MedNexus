@@ -85,7 +85,7 @@ const EvaluationPage = (function () {
       callout({ tone: "info", icon: "info", title: "What this measures",
         text: `${ev.note} Expected results: ${DATA.sources.gold}. High accuracy on this synthetic set is not evidence of production readiness.` }),
       card({ title: "Expected against predicted", meta: `All rules · ${Core.number(o.count)} pairs`, body: confusionMatrix(ev.confusion) }),
-      card({ title: "Per rule", meta: "Click a rule to open it", flush: true, body: perRuleTable(ev) }),
+      card({ title: "Per rule", meta: "Each rule opens its page: logic, policy values and the claims it flagged", flush: true, body: perRuleTable(ev) }),
       h("div", { class: "grid grid--main-side" },
         h("div", { class: "stack" }, mismatchCard(ev)),
         h("div", { class: "stack" }, aiCard())));

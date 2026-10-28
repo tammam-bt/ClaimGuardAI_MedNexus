@@ -373,6 +373,12 @@ code, kbd, pre, samp, .mono { font-family: var(--font-mono); font-size: var(--fo
 .nav__item[aria-current="page"] { background: var(--color-primary); color: var(--color-on-primary); }
 .nav__label { flex: 1; }
 .nav__item[aria-current="page"] .nav__count { background: var(--color-primary-subtle); color: var(--color-primary); }
+/* A reviewer's "More": the run's pages, one stop while closed. */
+.nav__more > summary { cursor: pointer; list-style: none; }
+.nav__more > summary::-webkit-details-marker { display: none; }
+.nav__more > summary .icon { transition: transform var(--duration-fast) var(--ease-standard); }
+.nav__more[open] > summary .icon { transform: rotate(180deg); }
+.nav__group { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-1); }
 .nav__count {
   min-width: 24px; padding: 1px var(--space-2); border-radius: var(--radius-full);
   background: var(--color-sidebar-badge); color: var(--color-sidebar-text-strong);
@@ -530,7 +536,12 @@ a.stat { color: inherit; text-decoration: none; }
 .table .num { text-align: right; white-space: nowrap; }
 .table td.num { font-family: var(--font-mono); font-size: var(--font-mono-scale); font-variant-numeric: tabular-nums; }
 .table .mono { white-space: nowrap; }
-.table-foot { display: flex; align-items: center; justify-content: space-between; padding: var(--space-3) var(--space-4); color: var(--color-text-muted); font-size: var(--text-sm); }
+/* A row that opens something: its first cell holds the link or button
+   (one tab stop per table); the row shows where the keyboard is. */
+.row-link { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: inherit; text-decoration: none; cursor: pointer; }
+.row-link:hover { color: inherit; }
+.table tbody tr:has(.row-link:focus-visible) { background: var(--color-surface-muted); }
+.table-foot { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; justify-content: space-between; padding: var(--space-3) var(--space-4); color: var(--color-text-muted); font-size: var(--text-sm); }
 
 /* -------------------------------------------------------------- filter bar */
 .filters { display: flex; align-items: flex-end; gap: var(--space-3); flex-wrap: wrap; }
@@ -797,3 +808,8 @@ details.disclosure[open] > summary { margin-bottom: var(--space-3); }
   border-radius: var(--radius-md); background: var(--color-primary); color: var(--color-on-primary); font-weight: var(--weight-semibold); }
 .skip-link:focus { top: var(--space-4); color: var(--color-on-primary); }
 .content:focus { outline: none; }
+
+/* ------------------------------------------------------ next to decide */
+.next-claim { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.next-claim__id { font-size: var(--text-lg); font-weight: var(--weight-semibold); }
+.next-claim .btn { margin-left: auto; }

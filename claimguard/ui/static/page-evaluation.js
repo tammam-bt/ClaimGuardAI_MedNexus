@@ -15,7 +15,7 @@ const EvaluationPage = (function () {
     const rows = DATA.rules.map((r) => ({ rule: r, m: ev.by_rule[r.rule_id] })).filter((x) => x.m);
     const n = (k) => ({ key: k, label: { tp: "TP", fp: "FP", fn: "FN", tn: "TN" }[k], num: true, sort: (x) => x.m[k], render: (x) => Core.number(x.m[k]) });
     const anyNotImplemented = rows.some((x) => x.m.not_implemented > 0);
-    return table({ caption: "Metrics per rule", rows, onRowClick: (x) => go("rules", x.rule.rule_id),
+    return table({ caption: "Metrics per rule", rows, rowHref: (x) => href("rules", x.rule.rule_id),
       columns: [
         { key: "rule", label: "Rule", sort: (x) => x.rule.rule_id, render: (x) => h("span", {},
           h("span", { class: "mono", text: x.rule.rule_id }), ` ${x.rule.title}`) },
@@ -35,7 +35,7 @@ const EvaluationPage = (function () {
     return card({ title: "Disagreements with the expected results", meta: Core.plural(rows.length, "pair"), flush: rows.length > 0,
       body: rows.length
         ? table({ caption: "Claim-rule pairs whose status differs from the expected one", rows,
-          onRowClick: (x) => go("claims", x.claim_id),
+          rowHref: (x) => href("claims", x.claim_id),
           columns: [
             { key: "claim", label: "Claim", sort: (x) => x.claim_id, render: (x) => h("span", { class: "mono", text: x.claim_id }) },
             { key: "rule", label: "Rule", sort: (x) => x.rule_id, render: (x) => h("span", {}, h("span", { class: "mono", text: x.rule_id }), ` ${ruleName(x.rule_id)}`) },

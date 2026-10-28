@@ -138,7 +138,8 @@ async function goTo(hash) {
 const text = (sel) => evaluate(`(document.querySelector(${JSON.stringify(sel)}) || {}).textContent || null`);
 
 // Real key presses and typing, for the keyboard-only flow.
-const KEYS = { Tab: ["Tab", 9], Enter: ["Enter", 13, "\r"], " ": ["Space", 32, " "], j: ["KeyJ", 74, "j"], k: ["KeyK", 75, "k"] };
+const KEYS = { Tab: ["Tab", 9], Enter: ["Enter", 13, "\r"], " ": ["Space", 32, " "], j: ["KeyJ", 74, "j"], k: ["KeyK", 75, "k"],
+  End: ["End", 35] };
 async function press(key, modifiers = 0) {
   const [code, vk, chars] = KEYS[key];
   await page("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode: vk, modifiers, text: chars });
@@ -178,7 +179,19 @@ try {
       crashed: await evaluate("document.querySelector('.content').textContent.includes('could not be drawn')"),
     };
   }
-  out.sidebarSame = await evaluate("document.querySelectorAll('.nav__item').length");
+  // The nav is the same on every page; a reviewer's is shorter, the rest under "More".
+  const NAV = "[...document.querySelectorAll('.nav > a.nav__item')].map(a => a.querySelector('.nav__label').textContent)";
+  const MORE = "[...document.querySelectorAll('.nav__more a.nav__item')].map(a => a.querySelector('.nav__label').textContent)";
+  out.sidebarSame = { reviewer: { main: await evaluate(NAV), more: await evaluate(MORE) } };
+  await goTo("#/audit");
+  out.sidebarSame.moreOpenOnItsPage = await evaluate("document.querySelector('.nav__more').open");
+
+  // An address without a page opens the reviewer's home: the Review Queue.
+  await page("Page.navigate", { url: "about:blank" });
+  await sleep(100);
+  await page("Page.navigate", { url: pathToFileURL(pagePath).href });
+  await waitFor("document.querySelector('.content') && document.querySelector('.content').children.length");
+  out.home = { title: await text(".topbar h1"), current: await evaluate("document.querySelector('.nav__item[aria-current=page] .nav__label').textContent") };
 
   // ---- keyboard: the skip link is the first stop and lands on the content
   await open(pagePath, "#/dashboard");  // a real reload: Tab starts from the top
@@ -206,6 +219,8 @@ try {
   await evaluate(`(() => { const s = document.querySelector('.topbar select'); s.value = 'admin'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
   await sleep(200);
   out.audit.admin = { count: await text(".filters__count"), types: await evaluate("[...document.querySelectorAll('.table tbody tr')].map(r => r.children[2].textContent)") };
+  out.sidebarSame.admin = await evaluate(NAV);
+  out.sidebarSame.adminMore = await evaluate("document.querySelectorAll('.nav__more').length");
   await evaluate(`(() => { const s = document.querySelector('.topbar select'); s.value = 'reviewer'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
   await sleep(200);
 
@@ -230,9 +245,39 @@ try {
     count: await text(".filters__count"),
     firstRoutes: await evaluate("[...document.querySelectorAll('.table tbody tr')].slice(0, 3).map(r => r.children[1].textContent)"),
   };
+  out.queueRows = {
+    drawn: await evaluate("document.querySelectorAll('.table tbody tr').length"),
+    fingerprints: await evaluate("document.querySelectorAll('.table tbody tr .fingerprint').length"),
+    foot: await text(".table-foot"),
+    stops: await evaluate("document.querySelectorAll('.table tbody [tabindex=\"0\"]').length"),
+    next: await text(".next-claim"),
+  };
+  // Keyboard: the table is one stop; j / k move, Tab leaves, Enter opens.
+  await evaluate("document.getElementById('content').focus()");
+  out.queueKb = { tabsToTable: await tabUntil("el.classList.contains('row-link')") };
+  out.queueKb.first = await evaluate("document.activeElement.textContent.slice(0, 15)");
+  await press("j");
+  await press("j");
+  out.queueKb.afterJJ = await evaluate("[...document.querySelectorAll('.row-link')].indexOf(document.activeElement)");
+  await press("k");
+  out.queueKb.afterK = await evaluate("[...document.querySelectorAll('.row-link')].indexOf(document.activeElement)");
+  await press("End");
+  out.queueKb.afterEnd = await evaluate("[...document.querySelectorAll('.row-link')].indexOf(document.activeElement)");
+  await press("Tab");
+  out.queueKb.afterTab = await evaluate("document.activeElement.classList.contains('row-link') ? 'row' : document.activeElement.textContent.trim()");
+  await evaluate("[...document.querySelectorAll('.table-foot button')].find(b => b.textContent.startsWith('Show')).click()");
+  await sleep(100);
+  out.queueKb.afterMore = { drawn: await evaluate("document.querySelectorAll('.table tbody tr').length"),
+    focused: await evaluate("[...document.querySelectorAll('.row-link')].indexOf(document.activeElement)") };
+  await evaluate("document.querySelector('.row-link').focus()");
+  await press("Enter");
+  await sleep(200);
+  out.queueKb.enterOpens = await evaluate("location.hash");
+  await goTo("#/queue");
   await evaluate("document.querySelector('.table tbody tr').click()");
   await sleep(200);
   out.queueRowOpens = await evaluate("location.hash");
+  out.backLink = await evaluate("(() => { const a = document.querySelector('.claim-head__title a'); return { text: a.textContent, href: a.getAttribute('href') }; })()");
 
   // ---- the decision flow on a claim with two findings
   const cid = "CG-785C09BD9CC8";
@@ -276,11 +321,11 @@ try {
   out.kb.first = await decide("R003", "Dismiss with reason", "Coverage extension confirmed by the payer.", "Reviewer 01");
   out.afterOne = { head: await text(".claim-head__title"), lifecycle: await text(".lifecycle"), count: await text(".nav__count") };
   out.kb.second = await decide("R004", "Dismiss with reason", "Member record corrected upstream.");
-  out.afterTwo = { head: await text(".claim-head__title"), count: await text(".nav__count") };
+  out.afterTwo = { head: await text(".claim-head__title"), count: await text(".nav__count"), next: await text("#next-claim") };
   out.drafts = await evaluate(`JSON.parse(localStorage.getItem('claimguard.drafts.' + JSON.parse(document.getElementById('claimguard-data').textContent).run.run_id))`);
   out.reviewerShown = await text(".sidebar__user-name");
   await goTo("#/queue");
-  out.queueAfter = { count: await text(".filters__count"), drafts: await text(".grid--4 .card:nth-child(4) .stat__value") };
+  out.queueAfter = { count: await text(".filters__count"), drafts: await text(".content .callout__title") };
   await goTo("#/queue?show=all");
   out.queueAll = await text(".filters__count");
   await goTo(`#/claims/${cid}`);
@@ -327,6 +372,12 @@ try {
   // List filters reach the URL.
   await goTo("#/claims?route=REVIEW");
   out.filtered = { count: await text(".filters__count"), hash: await evaluate("location.hash") };
+  // The sort reaches the URL too, and a link with it opens sorted.
+  await evaluate("document.querySelector('th[data-key=total] button').click()");
+  await sleep(100);
+  out.filtered.sortedHash = await evaluate("location.hash");
+  await goTo("#/claims?route=REVIEW&sort=-total");
+  out.filtered.linkSort = await evaluate("document.querySelector('th[data-key=total]').getAttribute('aria-sort')");
 
   // ---- a browser that will not store the draft: the page says so and the
   // reason is not lost

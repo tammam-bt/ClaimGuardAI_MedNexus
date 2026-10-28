@@ -17,7 +17,7 @@ const Dashboard = (function () {
       .sort((a, b) => (b.fail + b.unable) - (a.fail + a.unable)).slice(0, 8);
     return table({ caption: "Rules most often failing or unassessed", rows,
       empty: emptyState({ icon: "check-check", title: "No rule failed", text: "Every check passed or did not apply." }),
-      onRowClick: (x) => go("rules", x.rule.rule_id),
+      rowHref: (x) => href("rules", x.rule.rule_id),
       columns: [
         { key: "rule", label: "Rule", render: (x) => h("span", {}, h("span", { class: "mono", text: x.rule.rule_id }), ` ${x.rule.title}`) },
         { key: "severity", label: "Severity", render: (x) => severityBadge(x.rule.severity) },

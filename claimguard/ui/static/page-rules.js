@@ -84,7 +84,7 @@ const RulesPage = (function () {
           caption: "A failure sends the claim to review" }),
       ]),
       card({ title: "All rules", meta: "Every rule is deterministic: no model and no probability", flush: true, body: table({
-        caption: "The 15 rules", rows, onRowClick: (x) => go("rules", x.rule.rule_id),
+        caption: "The 15 rules", rows, rowHref: (x) => href("rules", x.rule.rule_id),
         columns: [
           { key: "id", label: "Rule", sort: (x) => x.rule.rule_id, render: (x) => h("span", {},
             h("span", { class: "mono", text: x.rule.rule_id }), ` ${x.rule.title}`) },

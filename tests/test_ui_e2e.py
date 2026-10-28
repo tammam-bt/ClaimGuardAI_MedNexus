@@ -76,7 +76,17 @@ class EndToEndTests(unittest.TestCase):
             self.assertFalse(page["crashed"], key)
             self.assertTrue(page["title"], key)
         self.assertEqual(self.out["pages"]["claims"]["current"], "Claims")
-        self.assertEqual(self.out["sidebarSame"], 7)
+
+    def test_navigation_follows_the_role(self):
+        nav = self.out["sidebarSame"]
+        # A reviewer's own pages first, the run's pages one step away under "More".
+        self.assertEqual(nav["reviewer"]["main"], ["Review Queue", "Claims", "Rules", "Settings"])
+        self.assertEqual(nav["reviewer"]["more"], ["Dashboard", "Audit Logs", "Evaluation"])
+        self.assertTrue(nav["moreOpenOnItsPage"])
+        self.assertEqual(nav["admin"], ["Dashboard", "Review Queue", "Claims", "Audit Logs", "Rules", "Evaluation", "Settings"])
+        self.assertEqual(nav["adminMore"], 0)
+        # An address without a page opens a reviewer's home.
+        self.assertEqual(self.out["home"], {"title": "Review Queue", "current": "Review Queue"})
 
     def test_accessibility_on_every_page(self):
         for key, page in self.out["pages"].items():
@@ -206,10 +216,36 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(o["queueBefore"]["count"], "264 of 264 claims")
         self.assertTrue(all("Escalate" in r for r in o["queueBefore"]["firstRoutes"]))
         self.assertTrue(o["queueRowOpens"].startswith("#/claims/CG-"))
+        # Back from a claim goes to the list it came from, filters included.
+        self.assertEqual(o["backLink"], {"text": "Review Queue", "href": "#/queue?show=open"})
         # Both findings dismissed: the claim is ready and leaves the open queue.
         self.assertEqual(o["queueAfter"]["count"], "263 of 264 claims")
-        self.assertEqual(o["queueAfter"]["drafts"], "2")
+        self.assertIn("2 drafts in this browser", o["queueAfter"]["drafts"])
         self.assertEqual(o["queueAll"], "264 of 264 claims")
+
+    def test_queue_rows_are_light_and_carry_the_fingerprint(self):
+        rows = self.out["queueRows"]
+        self.assertEqual(rows["drawn"], 50)  # of 264: the rest a button away
+        self.assertEqual(rows["fingerprints"], 50)
+        self.assertIn("Showing 50 of 264", rows["foot"])
+        self.assertTrue(rows["next"].startswith("CG-"))  # the next claim to decide, first
+        self.assertIn("Open claim", rows["next"])
+
+    def test_a_table_is_one_tab_stop(self):
+        rows, kb = self.out["queueRows"], self.out["queueKb"]
+        self.assertEqual(rows["stops"], 1)
+        self.assertLessEqual(kb["tabsToTable"], 25)
+        self.assertTrue(kb["first"].startswith("CG-"))
+        self.assertEqual((kb["afterJJ"], kb["afterK"], kb["afterEnd"]), (2, 1, 49))
+        self.assertEqual(kb["afterTab"], "Show 50 more")  # Tab leaves the table in one press
+        self.assertEqual(kb["afterMore"], {"drawn": 100, "focused": 50})
+        self.assertTrue(kb["enterOpens"].startswith("#/claims/CG-"))
+
+    def test_the_next_open_claim_follows_the_last_decision(self):
+        kb = self.out["kb"]
+        self.assertEqual(kb["second"]["nowFocused"], "next-claim")
+        self.assertTrue(self.out["afterTwo"]["next"].startswith("Next open claim: CG-"))
+        self.assertNotIn("CG-785C09BD9CC8", self.out["afterTwo"]["next"])
 
     def test_claim_page_speaks_a_reviewers_language(self):
         page = self.out["claimPage"]
@@ -249,6 +285,9 @@ class EndToEndTests(unittest.TestCase):
     def test_filters_reach_the_url(self):
         self.assertIn("route=REVIEW", self.out["filtered"]["hash"])
         self.assertTrue(self.out["filtered"]["count"].startswith("63 of"))
+        self.assertIn("sort=total", self.out["filtered"]["sortedHash"])
+        self.assertIn("route=REVIEW", self.out["filtered"]["sortedHash"])
+        self.assertEqual(self.out["filtered"]["linkSort"], "descending")
 
     def test_hostile_text_never_runs(self):
         h = self.out["hostile"]

@@ -79,7 +79,7 @@ const AuditPage = (function () {
           text: `${audit.error}. Do not trust these events until the log is restored from a trusted copy.` }),
       can("view_run_events") ? null : callout({ tone: "neutral", icon: "user",
         title: `${Core.plural(rows.length - visible.length, "run event")} hidden for your role`,
-        text: "Runs, rejections, injection flags, model failures and who ran each append are shown to admins. Switch “View as” to Admin to see them. This is a demonstration without login, not a security control." }),
+        text: "Runs, rejections, injection flags, model failures and who ran each append are shown to admins. Switch “Demo: view as” to Admin to see them. This is a demonstration without login, not a security control." }),
       card({ title: "Events", meta: h("span", { class: "mono small", text: audit.log }), flush: true,
         body: h("div", {}, h("div", { class: "card__body" }, filters), holder) }));
   }

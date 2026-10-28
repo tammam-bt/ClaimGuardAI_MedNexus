@@ -20,7 +20,7 @@ const SettingsPage = (function () {
     const confirmHolder = h("div", { class: "row" });
     function drawDrafts() {
       fill(confirmHolder,
-        button({ label: `Download decisions (${State.drafts.length})`, variant: "primary", icon: "download",
+        button({ label: `Download decisions (${State.drafts.length})`, icon: "download",
           disabled: State.drafts.length === 0, onClick: downloadDecisions }),
         button({ label: "Discard all drafts", variant: "danger", icon: "ban", disabled: State.drafts.length === 0,
           onClick: () => fill(confirmHolder,
@@ -32,7 +32,7 @@ const SettingsPage = (function () {
     return card({ title: "You", meta: "Kept in this browser only", body: h("div", { class: "stack" },
       h("label", { class: "field", for: "settings-name" }, "Your name", input),
       h("label", { class: "field", for: "settings-theme" }, "Theme", theme),
-      kv([["Viewing as", State.role === "admin" ? "Admin" : "Reviewer (change it in the top bar)"],
+      kv([["Viewing as", State.role === "admin" ? "Admin" : "Reviewer (demo switch in the top bar)"],
         ["Drafts", Core.plural(State.drafts.length, "decision") + " saved in this browser, not yet in the audit log"]]),
       confirmHolder,
       h("p", { class: "muted small", text: "Your name is recorded with each decision." })) });

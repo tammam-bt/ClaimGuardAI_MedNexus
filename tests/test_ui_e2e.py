@@ -106,6 +106,28 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(o["reloadedFresh"], "navigate")  # a real page load, not a hash change
         self.assertNotIn("null", o["headBefore"])
 
+    def test_a_claim_is_decided_by_keyboard_alone(self):
+        kb = self.out["kb"]
+        # Tab reaches the findings list as one stop, not one per finding.
+        self.assertLessEqual(kb["tabsToList"], 12)
+        self.assertEqual(kb["firstOption"], "R003")
+        self.assertEqual(kb["afterJ"], {"selected": "R004", "focused": "opt-R004"})
+        self.assertEqual(kb["afterK"], "R003")
+        first = kb["first"]
+        self.assertEqual(first["opened"], "finding-R003")       # Enter opens the finding
+        self.assertLessEqual(first["toAction"], 12)            # the actions are a few stops away
+        self.assertEqual(first["confirm"], "Yes, dismiss")      # Dismiss asks once more
+        # Saved: the next undecided finding opens by itself.
+        self.assertEqual(first["nowSelected"], "R004")
+        self.assertEqual(first["nowFocused"], "finding-R004")
+        self.assertEqual(kb["second"]["confirm"], "Yes, dismiss")
+        self.assertNotEqual(kb["replace"]["confirm"], "Yes, dismiss")  # only Dismiss asks
+
+    def test_a_draft_the_browser_will_not_store_is_not_lost(self):
+        s = self.out["storageFailure"]
+        self.assertIn("would not store the draft", s["alert"])
+        self.assertTrue(s["kept"])
+
     def test_dashboard(self):
         d = self.out["dashboard"]
         for part in ("400 records", "400 accepted", "6,000 checks", "4 flagged for injection", "495 explained · 4 withheld",

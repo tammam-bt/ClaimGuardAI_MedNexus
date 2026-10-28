@@ -137,6 +137,26 @@ async function goTo(hash) {
 }
 const text = (sel) => evaluate(`(document.querySelector(${JSON.stringify(sel)}) || {}).textContent || null`);
 
+// Real key presses and typing, for the keyboard-only flow.
+const KEYS = { Tab: ["Tab", 9], Enter: ["Enter", 13, "\r"], " ": ["Space", 32, " "], j: ["KeyJ", 74, "j"], k: ["KeyK", 75, "k"] };
+async function press(key, modifiers = 0) {
+  const [code, vk, chars] = KEYS[key];
+  await page("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode: vk, modifiers, text: chars });
+  await page("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode: vk, modifiers });
+  await sleep(60);
+}
+const typeText = (t) => page("Input.insertText", { text: t });
+// Tab until the focused element matches; returns the number of presses.
+async function tabUntil(expression, max = 80) {
+  for (let n = 1; n <= max; n++) {
+    await press("Tab");
+    if (await evaluate(`(() => { const el = document.activeElement; return !!(${expression}); })()`)) return n;
+  }
+  throw new Error(`Tab never reached ${expression}`);
+}
+const focused = () => evaluate("(document.activeElement.id || document.activeElement.textContent || '').trim()");
+const selectedRule = () => evaluate("(document.querySelector('.ws-list [aria-selected=true]') || {}).dataset?.rule || null");
+
 const out = { errors, network };
 try {
   const { targetId } = await send("Target.createTarget", { url: "about:blank" });
@@ -149,7 +169,7 @@ try {
   // ---- every page draws
   await open(pagePath, "#/dashboard");
   out.pages = {};
-  for (const key of ["dashboard", "queue", "claims", "audit", "rules", "evaluation", "settings", "components"]) {
+  for (const key of ["dashboard", "queue", "claims", "claims/CG-785C09BD9CC8", "audit", "rules", "evaluation", "settings", "components"]) {
     await goTo(`#/${key}`);
     out.pages[key] = {
       a11y: await evaluate(A11Y),
@@ -223,23 +243,39 @@ try {
   out.sidebarUserBefore = await text(".sidebar__user");
   out.saveDisabledWithoutName = await evaluate("[...document.querySelectorAll('#finding-R003 button')].find(b => b.textContent.includes('Save')).disabled");
 
-  const decide = async (rule, actionLabel, reason) => {
-    await evaluate(`(() => {
-      const f = document.querySelector('#finding-${rule}');
-      [...f.querySelectorAll('button')].find(b => b.textContent.trim() === ${JSON.stringify(actionLabel)}).click();
-    })()`);
-    await evaluate(`(() => {
-      const t = document.querySelector('#reason-${rule}');
-      t.value = ${JSON.stringify(reason)};
-      t.dispatchEvent(new Event('input', { bubbles: true }));
-      [...document.querySelectorAll('#finding-${rule} button')].find(b => b.textContent.includes('Save') || b.textContent.includes('Replace')).click();
-    })()`);
+  // Keyboard only, from the top of the content (where the skip link lands):
+  // Tab to the findings list, j/k to move, Enter to open, Tab to an action,
+  // Space to press it, type the reason, Tab to Save, Enter; Dismiss asks once
+  // more, with the focus on "Yes, dismiss".
+  out.kb = {};
+  await evaluate("document.getElementById('content').focus()");
+  out.kb.tabsToList = await tabUntil("el.getAttribute('role') === 'option'");
+  out.kb.firstOption = await evaluate("document.activeElement.dataset.rule");
+  await press("j");
+  out.kb.afterJ = { selected: await selectedRule(), focused: await focused() };
+  await press("k");
+  out.kb.afterK = await selectedRule();
+  const decide = async (rule, actionLabel, reason, name) => {
+    for (let n = 0; n < 20 && (await selectedRule()) !== rule; n++) await press("j");
+    await evaluate(`document.getElementById('opt-${rule}').focus()`);
+    await press("Enter");
+    const opened = await focused();
+    const toAction = await tabUntil(`el.textContent.trim() === ${JSON.stringify(actionLabel)}`);
+    await press(" ");
+    await tabUntil(`el.id === 'reason-${rule}'`);
+    await typeText(reason);
+    if (name) { await tabUntil(`el.id === 'name-${rule}'`); await typeText(name); }
+    await tabUntil("el.textContent.includes('Save draft') || el.textContent.includes('Replace the draft')");
+    await press("Enter");
+    const confirm = await focused();
+    if (actionLabel === "Dismiss with reason") await press("Enter");
+    await sleep(150);
+    return { opened, toAction, confirm, nowSelected: await selectedRule(), nowFocused: await focused() };
   };
 
-  await evaluate(`(() => { const i = document.querySelector('#reviewer-name'); i.value = 'Reviewer 01'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-  await decide("R003", "Dismiss with reason", "Coverage extension confirmed by the payer.");
+  out.kb.first = await decide("R003", "Dismiss with reason", "Coverage extension confirmed by the payer.", "Reviewer 01");
   out.afterOne = { head: await text(".claim-head__title"), lifecycle: await text(".lifecycle"), count: await text(".nav__count") };
-  await decide("R004", "Dismiss with reason", "Member record corrected upstream.");
+  out.kb.second = await decide("R004", "Dismiss with reason", "Member record corrected upstream.");
   out.afterTwo = { head: await text(".claim-head__title"), count: await text(".nav__count") };
   out.drafts = await evaluate(`JSON.parse(localStorage.getItem('claimguard.drafts.' + JSON.parse(document.getElementById('claimguard-data').textContent).run.run_id))`);
   out.reviewerShown = await text(".sidebar__user-name");
@@ -250,7 +286,7 @@ try {
   await goTo(`#/claims/${cid}`);
 
   // Replacing a decision keeps one draft per finding.
-  await decide("R004", "Request information", "Need the member card.");
+  out.kb.replace = await decide("R004", "Request information", "Need the member card.");
   out.afterReplace = { head: await text(".claim-head__title"), drafts: await evaluate(`JSON.parse(localStorage.getItem('claimguard.drafts.' + JSON.parse(document.getElementById('claimguard-data').textContent).run.run_id)).length`) };
 
   // ---- the decisions download is a real file, under the page's Content-Security-Policy
@@ -291,6 +327,28 @@ try {
   // List filters reach the URL.
   await goTo("#/claims?route=REVIEW");
   out.filtered = { count: await text(".filters__count"), hash: await evaluate("location.hash") };
+
+  // ---- a browser that will not store the draft: the page says so and the
+  // reason is not lost
+  const other = await evaluate(`JSON.parse(document.getElementById('claimguard-data').textContent).claims
+    .find((c) => c.route.reasons.length && !c.flag && c.claim.claim_id !== ${JSON.stringify(cid)}).claim.claim_id`);
+  await goTo(`#/claims/${other}`);
+  await evaluate("Storage.prototype.__setItem = Storage.prototype.setItem; Storage.prototype.setItem = function () { throw new DOMException('full', 'QuotaExceededError'); }");
+  const failRule = await selectedRule();
+  await evaluate(`(() => {
+    const f = document.getElementById('finding-${failRule}');
+    [...f.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Request information').click();
+    const t = document.getElementById('reason-${failRule}');
+    t.value = 'Kept although storage failed.';
+    t.dispatchEvent(new Event('input', { bubbles: true }));
+    [...f.querySelectorAll('button')].find((b) => b.textContent.includes('Save draft')).click();
+  })()`);
+  await sleep(150);
+  out.storageFailure = {
+    alert: await evaluate(`(document.querySelector('#finding-${failRule} [role=alert]') || {}).textContent || null`),
+    kept: await evaluate(`document.querySelector('#finding-${failRule}').textContent.includes('Kept although storage failed.')`),
+  };
+  await evaluate("Storage.prototype.setItem = Storage.prototype.__setItem");
 
   // ---- hostile claim text never runs
   await open(hostilePath, "#/claims");

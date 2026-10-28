@@ -48,7 +48,8 @@ const Shell = (function () {
   }
 
   function roleSwitch() {
-    return h("label", { class: "row small muted" }, "View as",
+    // A demonstration switch, not access control: the page has no login.
+    return h("label", { class: "row small muted" }, "Demo: view as",
       h("select", { class: "select", "aria-label": "Role", onChange: (e) => { State.role = e.target.value; State.save(); render(); } },
         [["reviewer", "Reviewer"], ["admin", "Admin"]].map(([v, l]) => h("option", { value: v, selected: State.role === v ? true : null, text: l }))));
   }

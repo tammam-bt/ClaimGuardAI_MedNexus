@@ -96,10 +96,19 @@ class EndToEndTests(unittest.TestCase):
 
     def test_no_page_scrolls_sideways_at_any_width(self):
         self.assertEqual(sorted(self.out["narrow"], key=int), ["375", "768", "1280", "1440"])
-        for width, pages in self.out["narrow"].items():
-            for key, overflow in pages.items():
-                if not key.endswith("(wide)"):
-                    self.assertLessEqual(overflow, 0, f"{key} at {width} px: {pages.get(key + ' (wide)')}")
+        # Every page that scrolls, at once, with what sticks out.
+        wide = [f"{key} at {width} px by {overflow} px: {pages.get(key + ' (wide)')}"
+                for width, pages in self.out["narrow"].items() for key, overflow in pages.items()
+                if not key.endswith("(wide)") and overflow > 0]
+        self.assertEqual(wide, [])
+
+    def test_no_page_scrolls_sideways_with_a_wider_font(self):
+        # CI on Linux draws with DejaVu Sans, wider than Segoe UI: the filters
+        # once scrolled the Queue sideways there and nowhere else.
+        pages = self.out["narrowWideFont"]
+        wide = [f"{key} by {overflow} px: {pages.get(key + ' (wide)')}" for key, overflow in pages.items()
+                if not key.endswith("(wide)") and overflow > 0]
+        self.assertEqual(wide, [])
 
     def test_below_1100px_the_sidebar_is_a_drawer(self):
         d = self.out["drawer"]

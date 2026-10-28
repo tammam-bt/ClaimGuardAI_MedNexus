@@ -94,6 +94,7 @@ The plan asked for View Transitions where the browser has them. They were tried 
 - **The drawer** opens over the page, which is inert meanwhile, with the focus on the current page's link. Escape, the backdrop or a link closes it, and the focus goes back to the menu button. Closed, it is inert too, so Tab never lands on a link it cannot see.
 - **Focus between the claim's panes:** Enter on a finding moves into it, Escape comes back to the list. Where the claim data sits under the finding, "show in claim" takes the focus to the field and Escape brings it back to the chip.
 - **Headings never skip a level:** card titles are h2 under the page's h1, or h3 (`card({ level: 3 })`) on a page with its own h2, a claim or a rule. The e2e test checks every page.
+- **Fonts differ by system:** a select is as wide as its longest option, and a long ID or token can be wider than a phone. Fields and selects never exceed their row, and text breaks inside a long word rather than scroll the page; the e2e test checks 375 px with a wide font too.
 - **`tabs(name, list)`** is one tab stop: the arrow keys, Home and End move and open; each tab controls the panel, which is named by the active tab.
 
 ## 7. Checked on which systems

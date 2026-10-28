@@ -223,6 +223,23 @@ try {
     }
   }
 
+  // The same at 375 px with a wide font forced on everything (Verdana, or
+  // DejaVu Sans on Linux): a select is as wide as its longest option, so a
+  // page that fits with Segoe UI can still scroll on another system.
+  await page("Emulation.setDeviceMetricsOverride", { width: 375, height: 812, deviceScaleFactor: 1, mobile: false });
+  await evaluate(`(() => { const s = document.createElement('style'); s.id = 'wide-font';
+    s.textContent = '*, *::before, *::after { font-family: Verdana, "DejaVu Sans", sans-serif !important; }';
+    document.head.appendChild(s); })()`);
+  out.narrowWideFont = {};
+  for (const key of ["dashboard", "queue", "claims", "claims/CG-785C09BD9CC8", "audit", "rules", "rules/R013", "evaluation", "settings", "components"]) {
+    await goTo(`#/${key}`);
+    out.narrowWideFont[key] = await evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth");
+    if (out.narrowWideFont[key] > 0) out.narrowWideFont[`${key} (wide)`] = await evaluate(`[...document.querySelectorAll('body *')]
+      .filter((e) => e.getBoundingClientRect().right > document.documentElement.clientWidth + 1).slice(0, 6)
+      .map((e) => e.tagName.toLowerCase() + '.' + e.className)`);
+  }
+  await evaluate("document.getElementById('wide-font').remove()");
+
   // ---- below 1100 px the sidebar is a drawer
   const drawerState = () => evaluate(`({ expanded: document.querySelector('.menu-btn').getAttribute('aria-expanded'),
     sidebarInert: document.getElementById('sidebar').inert, mainInert: document.querySelector('.main').inert,

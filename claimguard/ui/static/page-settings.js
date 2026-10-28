@@ -1,6 +1,6 @@
 "use strict";
-// Settings: the only things a viewer sets here (their name, the role to view
-// as, their unsent drafts), then how review works, read-only. Configuration
+// Settings: the only things a viewer sets here (their name, the theme, the
+// role to view as, their unsent drafts), then how review works, read-only. Configuration
 // is changed where it lives (rules/*.json, the environment before
 // claimguard.run), never in this page, which cannot change the backend.
 
@@ -15,6 +15,8 @@ const SettingsPage = (function () {
     const input = h("input", { id: "settings-name", class: "input", autocomplete: "name", placeholder: "e.g. Reviewer 01",
       onInput: (e) => { State.reviewer = e.target.value; State.save(); } });
     input.value = State.reviewer;
+    const theme = h("select", { id: "settings-theme", class: "select", onChange: (e) => { State.theme = e.target.value; State.save(); } },
+      THEMES.map(([v, l]) => h("option", { value: v, selected: State.theme === v ? true : null, text: l })));
     const confirmHolder = h("div", { class: "row" });
     function drawDrafts() {
       fill(confirmHolder,
@@ -29,6 +31,7 @@ const SettingsPage = (function () {
     drawDrafts();
     return card({ title: "You", meta: "Kept in this browser only", body: h("div", { class: "stack" },
       h("label", { class: "field", for: "settings-name" }, "Your name", input),
+      h("label", { class: "field", for: "settings-theme" }, "Theme", theme),
       kv([["Viewing as", State.role === "admin" ? "Admin" : "Reviewer (change it in the top bar)"],
         ["Drafts", Core.plural(State.drafts.length, "decision") + " saved in this browser, not yet in the audit log"]]),
       confirmHolder,

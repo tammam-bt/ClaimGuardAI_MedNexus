@@ -17,7 +17,7 @@ const CLAIM_BY_ID = new Map(CLAIMS.map((c) => [c.claim.claim_id, c]));
 const RULE_BY_ID = new Map(DATA.rules.map((r) => [r.rule_id, r]));
 
 // ---------------------------------------------------------------- storage
-// Per-viewer conveniences only (role, name, unsent decisions). It can be
+// Per-viewer conveniences only (role, name, theme, unsent decisions). It can be
 // empty or unavailable; the app works without it.
 const Store = {
   get(key, fallback) {
@@ -32,16 +32,26 @@ const Store = {
 const State = {
   role: Store.get("role", "reviewer") === "admin" ? "admin" : "reviewer",
   reviewer: String(Store.get("reviewer", "") || ""),
+  theme: (() => { const t = Store.get("theme", "system"); return t === "light" || t === "dark" ? t : "system"; })(),
   drafts: (() => { const d = Store.get(`drafts.${RUN_ID}`, []); return Array.isArray(d) ? d : []; })(),
   listeners: [],
   save() {
     Store.set("role", this.role);
     Store.set("reviewer", this.reviewer);
+    Store.set("theme", this.theme);
     Store.set(`drafts.${RUN_ID}`, this.drafts);
     this.listeners.forEach((fn) => fn());
   },
   onChange(fn) { this.listeners.push(fn); },
 };
+
+// Theme: "system" follows the operating system (prefers-color-scheme);
+// "light" or "dark" is this viewer's choice, set as <html data-theme>.
+const THEMES = [["system", "Same as the system"], ["light", "Light"], ["dark", "Dark"]];
+function applyTheme() {
+  if (State.theme === "system") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = State.theme;
+}
 
 // Review decisions already in the audit chain, then this viewer's drafts.
 const RECORDED = DATA.audit
@@ -368,6 +378,124 @@ function lifecycleStrip(stages, opts) {
     return h("li", {}, o.onPick
       ? h("button", { type: "button", class: cls, style: { width: "100%" }, onClick: () => o.onPick(s) }, inner)
       : h("div", { class: cls }, inner));
+  }));
+}
+
+// ------------------------------------------------- signature components
+// The check fingerprint: a claim's 15 checks as 15 cells, in rule order.
+// Each status has its own shape as well as its color (a solid block, a
+// hatched block, a dashed or hollow outline, a low bar), so it reads in
+// grey too. One label sums it up for a screen reader; each cell names its
+// rule on hover. size: "sm" (queue rows) or "md" (claim header).
+const FINGERPRINT_SHAPE = { PASS: "pass", FAIL: "fail", UNABLE_TO_ASSESS: "unable", NOT_APPLICABLE: "na", NOT_IMPLEMENTED: "ni" };
+function fingerprintLabel(results) {
+  const parts = Core.STATUS_ORDER.map((s) => {
+    const hits = results.filter((r) => r.status === s);
+    if (!hits.length) return null;
+    const ids = s === "PASS" || s === "NOT_APPLICABLE" ? "" : ` (${hits.map((r) => r.rule_id).join(", ")})`;
+    return `${hits.length} ${Core.STATUS[s].label.toLowerCase()}${ids}`;
+  }).filter(Boolean);
+  return `${Core.plural(results.length, "check")}: ${parts.join(", ")}`;
+}
+function fingerprint(results, opts) {
+  const o = opts || {};
+  return h("span", { class: `fingerprint fingerprint--${o.size || "md"}`, role: "img", "aria-label": fingerprintLabel(results) },
+    results.map((r) => h("span", { class: `fp-cell is-${FINGERPRINT_SHAPE[r.status] || "na"}`,
+      title: `${r.rule_id} ${ruleName(r.rule_id)}: ${(Core.STATUS[r.status] || { label: r.status }).label}` })));
+}
+
+// One piece of evidence as a chip: the field, named for a reviewer, and the
+// value the engine cited. With onShow it is a toggle ("show in claim"),
+// pressed while its field is highlighted; that is the evidence thread.
+function evidenceChip(e, claim, opts) {
+  const o = opts || {};
+  const missing = e.value === null || e.value === undefined || e.value === "";
+  const structured = !missing && typeof e.value === "object";
+  const shown = missing ? "missing" : structured ? (Array.isArray(e.value) ? `list of ${e.value.length}` : "structured value") : Core.plain(e.value);
+  const inner = [h("span", { class: "chip__field", text: Core.fieldLabel(e.path, claim) }),
+    h("span", { class: `chip__value${missing ? " is-missing" : ""}`, text: shown })];
+  const cls = `chip${missing ? " chip--missing" : ""}`;
+  return o.onShow
+    ? h("button", { type: "button", class: cls, "aria-pressed": String(!!o.active), title: "Show in claim", onClick: () => o.onShow(e) }, inner)
+    : h("span", { class: cls }, inner);
+}
+
+// A finding in three labelled layers: what the claim says (the cited
+// fields), why it matters (rule text or AI, labelled), and the reviewer's
+// decision. opts: { result, claimLayer, explanationLayer, decisionLayer,
+// selected }.
+function findingBlock(opts) {
+  const r = opts.result;
+  const s = Core.STATUS[r.status] || Core.STATUS.NOT_APPLICABLE;
+  const layer = (n, label, glyph, body) => h("section", { class: "layer", "aria-label": label },
+    h("div", { class: "layer__head" }, h("span", { class: "layer__mark", "aria-hidden": "true" }, icon(glyph, { size: "sm" })),
+      h("span", { class: "label", text: `${n}. ${label}` })),
+    h("div", { class: "layer__body" }, body));
+  return h("article", { class: `finding-block is-${s.tone}${opts.selected ? " is-selected" : ""}`, "aria-label": `${r.rule_id} ${ruleName(r.rule_id)}` },
+    h("div", { class: "finding-block__head" },
+      h("span", { class: "mono", text: r.rule_id }), h("span", { class: "finding-block__title", text: ruleName(r.rule_id) }),
+      statusBadge(r.status), severityBadge(r.severity, { long: true }),
+      (r.affected_line_ids || []).length ? badge(`Line ${r.affected_line_ids.join(", ")}`, { tone: "neutral" }) : null),
+    layer(1, "From the claim", "file-text", opts.claimLayer),
+    layer(2, "Explanation", "scroll", opts.explanationLayer),
+    layer(3, "Your decision", "user", opts.decisionLayer));
+}
+
+// The reviewer's decision on one finding: the four actions, a reason
+// (required), and Save. It holds no state of its own: the caller passes the
+// state and redraws on each callback. opts: { id, action, reason, reviewer,
+// allowed(action), notImplemented, draft, recorded, error, onAction,
+// onReason, onName, onSave, onDiscard }. Your name comes just before Save
+// when it is missing, so the keyboard meets it on the way.
+function decisionPanel(opts) {
+  const o = opts;
+  const reasonId = `reason-${o.id}`, hintId = `reason-hint-${o.id}`;
+  const named = String(o.reviewer || "").trim() !== "";
+  const ready = !!o.action && String(o.reason || "").trim() !== "" && named && o.allowed(o.action);
+  const reason = h("textarea", { id: reasonId, class: `textarea${o.error ? " textarea--invalid" : ""}`, rows: "3",
+    placeholder: "Why? Kept with your name in this browser's draft.", "aria-describedby": hintId, required: true,
+    onInput: (e) => o.onReason(e.target.value) });
+  reason.value = o.reason || "";
+  const nameField = named || !o.onName ? null : (() => {
+    const input = h("input", { id: `name-${o.id}`, class: "input", autocomplete: "name", placeholder: "e.g. Reviewer 01",
+      onInput: (e) => o.onName(e.target.value) });
+    return h("label", { class: "field", for: `name-${o.id}` }, "Your name (needed to save)", input);
+  })();
+  return h("div", { class: "decision-panel" },
+    o.recorded ? callout({ tone: "info", icon: "history", title: "In the audit log",
+      text: `${Core.ACTION[o.recorded.action].label} by ${o.recorded.actor}, ${Core.datetime(o.recorded.created_at)}: ${o.recorded.reason}` }) : null,
+    o.draft ? callout({ tone: "pass", icon: Core.ACTION[o.draft.action].icon, title: "Draft saved in this browser, not yet in the audit log",
+      text: `${Core.ACTION[o.draft.action].label} by ${o.draft.actor}: ${o.draft.reason}`,
+      body: o.onDiscard ? h("div", { class: "row" }, button({ label: "Discard this draft", variant: "ghost", icon: "ban", onClick: o.onDiscard })) : null }) : null,
+    o.notImplemented ? callout({ tone: "neutral", icon: "circle-dashed", title: "This check did not run",
+      text: "It cannot be dismissed (routing policy): only an implementation can settle it." }) : null,
+    h("div", { class: "row row--tight", role: "group", "aria-label": "Review action" },
+      Core.ACTION_ORDER.map((a) => button({ label: Core.ACTION[a].label, icon: Core.ACTION[a].icon, title: Core.ACTION[a].help,
+        pressed: o.action === a, disabled: !o.allowed(a) || (o.notImplemented && a === "dismiss_with_reason"),
+        onClick: () => o.onAction(o.action === a ? null : a) }))),
+    o.action ? h("p", { class: "muted small", text: Core.ACTION[o.action].help }) : null,
+    h("label", { class: "field", for: reasonId }, "Reason (required)", reason),
+    h("p", { id: hintId, class: "muted small", text: "Saved as a draft in this browser. An administrator adds drafts to the audit log." }),
+    o.error ? callout({ tone: "fail", icon: "alert-triangle", role: "alert", title: "Not saved", text: `${o.error} Your reason is kept above.` }) : null,
+    nameField,
+    h("div", { class: "row" },
+      button({ label: o.draft ? "Replace the draft" : "Save draft", variant: "primary", disabled: !ready, onClick: () => { if (ready) o.onSave(); } }),
+      !o.action ? h("span", { class: "muted small", text: "Choose an action first." }) : null));
+}
+
+// A claim's history, oldest first. A logged event (in the audit chain) and
+// a draft (only in this browser) never look alike: a solid mark against a
+// dashed one, and the draft says so in words.
+// items: [{ kind: "logged" | "draft", badge, meta, text, onOpen }]
+function timeline(items, opts) {
+  const o = opts || {};
+  return h("ol", { class: "timeline", "aria-label": o.label || "History" }, items.map((it) => {
+    const body = [h("span", { class: "row row--tight" }, it.badge,
+      it.kind === "draft" ? badge("Draft, not in the audit log", { tone: "neutral" }) : null,
+      it.meta ? h("span", { class: "muted small", text: it.meta }) : null),
+    h("span", { class: "small", text: it.text })];
+    return h("li", { class: `timeline__item is-${it.kind}` }, h("span", { class: "timeline__mark", "aria-hidden": "true" }),
+      it.onOpen ? h("button", { type: "button", class: "timeline__body", onClick: it.onOpen }, body) : h("div", { class: "timeline__body" }, body));
   }));
 }
 

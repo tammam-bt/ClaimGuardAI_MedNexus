@@ -106,5 +106,7 @@ const Shell = (function () {
   return { build, render, refreshUser };
 })();
 
+applyTheme();  // before the first draw, so the page never flashes the other theme
+State.onChange(applyTheme);
 Shell.build();
 Shell.render();

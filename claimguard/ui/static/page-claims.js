@@ -279,7 +279,7 @@ const ClaimDetail = (function () {
       ["Max quantity", `/authorizations/${i}/max_quantity`, h("span", { class: "num" }, value(a.max_quantity))],
     ])));
     return h("div", { class: "stack" },
-      card({ title: "Claim", body: fields([
+      card({ level: 3, title: "Claim", body: fields([
         ["Patient", "/patient_id", mono(c.patient_id)], ["Member", "/member_id", mono(c.member_id)],
         ["Provider", "/provider_id", mono(c.provider_id)], ["Payer", "/payer_id", mono(c.payer_id)],
         ["Policy", "/policy_id", h("span", { class: "row row--tight" }, mono(c.policy_id),
@@ -288,15 +288,15 @@ const ClaimDetail = (function () {
         ["Submitted", "/submission_date", day(c.submission_date)],
         ["Total", "/total_amount", money(c.total_amount)], ["Currency", "/currency", mono(c.currency)],
       ]) }),
-      card({ title: "Coverage", body: fields([
+      card({ level: 3, title: "Coverage", body: fields([
         ["Coverage", "/coverage/coverage_id", mono(cv.coverage_id)], ["Status", "/coverage/status", value(cv.status)],
         ["Beneficiary", "/coverage/beneficiary_patient_id", mono(cv.beneficiary_patient_id)], ["Member", "/coverage/member_id", mono(cv.member_id)],
         ["Start", "/coverage/start_date", day(cv.start_date)], ["End", "/coverage/end_date", day(cv.end_date)],
       ]) }),
-      card({ title: `Service lines (${c.lines.length})`, body: h("div", { class: "stack", "data-path": "/lines" }, lines) }),
-      card({ title: "Authorizations", body: h("div", { class: "stack", "data-path": "/authorizations" }, auths.length ? auths
+      card({ level: 3, title: `Service lines (${c.lines.length})`, body: h("div", { class: "stack", "data-path": "/lines" }, lines) }),
+      card({ level: 3, title: "Authorizations", body: h("div", { class: "stack", "data-path": "/authorizations" }, auths.length ? auths
         : h("p", { class: "muted small", text: "No authorization supplied (an empty inventory, not an unknown)." })) }),
-      card({ title: "Documents", body: h("div", { "data-path": "/attachments" }, attachmentsBlock(entry)) }));
+      card({ level: 3, title: "Documents", body: h("div", { "data-path": "/attachments" }, attachmentsBlock(entry)) }));
   }
 
   function attachmentsBlock(entry) {
@@ -341,8 +341,15 @@ const ClaimDetail = (function () {
     };
     const stateOf = (rule) => (draftFor(entry, rule) ? "draft" : recordedFor(entry, rule) ? "logged" : "open");
 
-    const pane = h("div", { class: "ws-pane ws-pane--claim", role: "region", "aria-label": "Claim data", tabindex: "-1" }, claimPane(entry));
-    const findingHolder = h("div", { class: "ws-pane ws-pane--finding" });
+    // Focus between the panes: Enter on a finding moves into it, Escape
+    // comes back to the list. Where the claim data sits below the finding
+    // (not beside it), "show in claim" takes the focus to the field and
+    // Escape brings it back to the chip.
+    const pane = h("div", { class: "ws-pane ws-pane--claim", role: "region", "aria-label": "Claim data", tabindex: "-1",
+      onKeydown: (e) => { if (e.key === "Escape" && st.back && st.back.isConnected) { e.preventDefault(); st.back.focus(); st.back = null; } } },
+    claimPane(entry));
+    const findingHolder = h("div", { class: "ws-pane ws-pane--finding",
+      onKeydown: (e) => { if (e.key === "Escape" && !panelState && st.selected) { e.preventDefault(); focusOption(st.selected); } } });
     const listHolder = h("div");
     const count = h("span", { class: "filters__count", role: "status" });
     const progressHolder = h("div");
@@ -415,10 +422,16 @@ const ClaimDetail = (function () {
       const chips = h("div", { class: "chips" });
       const drawChips = () => fill(chips, r.evidence.map((e) => evidenceChip(e, entry.claim, { active: st.active === e.path,
         onShow: (ev) => {
+          const chip = document.activeElement;
           st.active = st.active === ev.path ? null : ev.path;
           chips.querySelectorAll(".chip").forEach((c, i) => c.setAttribute("aria-pressed", String(st.active === r.evidence[i].path)));
           markEvidence(r);
-          if (st.active) announce.textContent = `${Core.fieldLabel(ev.path, Core.current(entry).claim)} highlighted in the claim data.`;
+          if (!st.active) return;
+          const stacked = getComputedStyle(pane).position !== "sticky";
+          const field = stacked ? targets(pane, st.active)[0] : null;
+          announce.textContent = `${Core.fieldLabel(ev.path, Core.current(entry).claim)} highlighted in the claim data.` +
+            (field ? " Escape returns to the finding." : "");
+          if (field) { st.back = chip; field.setAttribute("tabindex", "-1"); field.focus({ preventScroll: true }); }
         } })));
       drawChips();
       const article = findingBlock({ result: r, claimLayer: chips, explanationLayer: explanationLayer(entry, r),
@@ -522,7 +535,7 @@ const ClaimDetail = (function () {
   // ------------------------------------------------- below the workspace
   function versionsCard(entry) {
     if (!entry.versions || !entry.versions.length) return null;
-    return card({ title: "Corrected versions", meta: "The claim as received (v1) is never edited", body: h("div", { class: "stack" },
+    return card({ level: 3, title: "Corrected versions", meta: "The claim as received (v1) is never edited", body: h("div", { class: "stack" },
       entry.versions.map((v) => h("div", { class: "stack" },
         h("div", { class: "row" }, badge(`v${v.version}`, { tone: "info", icon: "refresh" }), routeBadge(v.route.route),
           h("span", { class: "small", text: `by ${v.actor}: ${v.reason}` })),
@@ -548,7 +561,7 @@ const ClaimDetail = (function () {
       ...State.drafts.filter((d) => d.claim_id === id).map((d) => ({ kind: "draft", badge: eventBadge(d),
         meta: Core.datetime(d.created_at), text: eventSummary(d) })),
     ];
-    return card({ title: "History", meta: DATA.audit ? "Audit log, then drafts in this browser" : null, body: items.length
+    return card({ level: 3, title: "History", meta: DATA.audit ? "Audit log, then drafts in this browser" : null, body: items.length
       ? timeline(items, { label: `History of ${id}` })
       : h("p", { class: "muted small", text: DATA.audit ? "No event your role can see for this claim yet." : "No audit log was loaded for this run." }) });
   }
@@ -557,7 +570,7 @@ const ClaimDetail = (function () {
     const entry = CLAIM_BY_ID.get(id);
     if (!entry) {
       keyHandler = null;
-      return card({ body: emptyState({ icon: "search", title: `No claim ${id} in this run`,
+      return card({ level: 3, body: emptyState({ icon: "search", title: `No claim ${id} in this run`,
         text: "It may have been rejected at ingestion, or belong to another run.", action: linkButton({ href: href("claims"), label: "All claims", icon: "chevron-left" }) }) });
     }
     // Everything a reviewer decides on is the current version: the newest
@@ -619,14 +632,14 @@ const ClaimDetail = (function () {
           "decisions on an earlier version no longer count. The claim as received (v1) is kept unchanged below." }) : null,
       finds.length ? section("sec-findings", ws) : section("sec-findings", routeCallout(cur, pick)),
       finds.length ? section("sec-route", routeCallout(cur, pick)) : null,
-      card({ title: "Life cycle", body: lifecycleHolder }),
-      section("sec-checks", card({ title: `All 15 checks${onVersion}`,
+      card({ level: 3, title: "Life cycle", body: lifecycleHolder }),
+      section("sec-checks", card({ level: 3, title: `All 15 checks${onVersion}`,
         meta: `${counts.PASS} passed · ${counts.FAIL} failed · ${counts.UNABLE_TO_ASSESS} unable · ${counts.NOT_APPLICABLE} n/a` +
           (counts.NOT_IMPLEMENTED ? ` · ${counts.NOT_IMPLEMENTED} not implemented` : ""),
         body: checkGrid(cur.results, { onPick: (r) => (finds.some((f) => f.result.rule_id === r.rule_id) ? pick(r.rule_id) : resultPanel(cur, r)) }) })),
       versionsCard(entry),
       historyHolder,
-      section("sec-received", card({ title: "Claim as received", body: h("details", { class: "disclosure" },
+      section("sec-received", card({ level: 3, title: "Claim as received", body: h("details", { class: "disclosure" },
         h("summary", { text: "Show the JSON envelope (untrusted text shown as data)" }),
         h("pre", { class: "untrusted", text: JSON.stringify(entry.claim, null, 2) })) })));
   }

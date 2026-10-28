@@ -8,7 +8,7 @@
 // Apple), so this is the card to compare across machines.
 function typeScale() {
   const sizes = [["xs", "12"], ["sm", "14 · body"], ["base", "16"], ["lg", "18"], ["xl", "20"], ["2xl", "24"], ["3xl", "30"], ["4xl", "36"]];
-  return card({ title: "Type", meta: "System fonts: the face differs by OS, the scale does not", body: h("div", { class: "stack" },
+  return card({ level: 3, title: "Type", meta: "System fonts: the face differs by OS, the scale does not", body: h("div", { class: "stack" },
     h("div", {}, sizes.map(([k, px]) => h("div", { class: "type-row" },
       h("span", { class: "mono small muted", text: `--text-${k} (${px})` }),
       h("span", { class: `t-${k}` }, "Coverage active on service date ", h("span", { class: "num", text: "1,520.00 · 0O 1lI" }))))),
@@ -47,12 +47,12 @@ function signature(sample, fail, specimen) {
   ];
 
   return [
-    card({ title: "Check fingerprint", meta: "15 cells, one per rule; shape and color", body: h("div", { class: "stack" },
+    card({ level: 3, title: "Check fingerprint", meta: "15 cells, one per rule; shape and color", body: h("div", { class: "stack" },
       specimen("Legend", h("div", { class: "fp-legend" }, legend)),
       specimen("Escalate, review and clear claims (small for rows, medium for the claim header)",
         h("div", { class: "stack" }, row(sample), row(unable), row(clear)))) }),
 
-    card({ title: "Evidence chips", meta: `${fail.rule_id} on ${fail.claim_id}`, body: h("div", { class: "stack" },
+    card({ level: 3, title: "Evidence chips", meta: `${fail.rule_id} on ${fail.claim_id}`, body: h("div", { class: "stack" },
       specimen("Cited fields; the second pressed (shown in the claim)", h("div", { class: "chips" },
         fail.evidence.map((e, i) => evidenceChip(e, sample.claim, { onShow: noop, active: i === 1 })))),
       specimen("A value missing in the source, and a structured value", h("div", { class: "chips" },
@@ -65,7 +65,7 @@ function signature(sample, fail, specimen) {
       explanationLayer: h("div", { class: "stack" }, h("div", { class: "row row--tight" }, sourceBadge("mock")), h("p", { text: fail.explanation })),
       decisionLayer: panel({ key: "layer" }) })),
 
-    card({ title: "Decision panel", meta: "Every state; examples, nothing is saved", body: h("div", { class: "grid grid--2" },
+    card({ level: 3, title: "Decision panel", meta: "Every state; examples, nothing is saved", body: h("div", { class: "grid grid--2" },
       specimen("No name yet: the field comes before Save", panel({ key: "noname", reviewer: "", action: "confirm_issue", reason: "Example reason." })),
       specimen("Action chosen, no reason", panel({ key: "noreason", action: "dismiss_with_reason" })),
       specimen("Ready to save", panel({ key: "ready", action: "request_information", reason: "Example: the coverage letter is missing." })),
@@ -75,9 +75,9 @@ function signature(sample, fail, specimen) {
         error: "This browser refused to store the draft." })),
       specimen("The check did not run: Dismiss is unavailable", panel({ key: "ni", notImplemented: true }))) }),
 
-    card({ title: "Timeline", meta: "Logged events against drafts", body: timeline(items, { label: "Example history" }) }),
+    card({ level: 3, title: "Timeline", meta: "Logged events against drafts", body: timeline(items, { label: "Example history" }) }),
 
-    card({ title: "Drawer", meta: "The side panel; below 1100 px it holds the claim's details", body: h("div", { class: "row" },
+    card({ level: 3, title: "Drawer", meta: "The side panel that opens a check or an audit event", body: h("div", { class: "row" },
       button({ label: "Open the drawer", icon: "chevron-left", onClick: () => openPanel(sample.claim.claim_id, h("div", { class: "stack" },
         fingerprint(sample.results), kv([["Route", routeBadge(sample.route.route)], ["Submitted", Core.date(sample.claim.submission_date)],
           ["Total", h("span", { class: "num", text: Core.money(sample.claim.total_amount, sample.claim.currency) })]]))) }),
@@ -102,10 +102,10 @@ registerPage({
     return h("div", { class: "stack" },
       pageHead({ title: "Component reference", text: "Built from this run's data. Open with #/components." }),
 
-      card({ title: "Icons", meta: `${iconNames.length} icons, one per concept`, body:
+      card({ level: 3, title: "Icons", meta: `${iconNames.length} icons, one per concept`, body:
         h("div", { class: "grid grid--4" }, iconNames.map((n) => h("span", { class: "row small" }, icon(n), h("span", { class: "mono", text: n })))) }),
 
-      card({ title: "Badges", body: h("div", { class: "stack" },
+      card({ level: 3, title: "Badges", body: h("div", { class: "stack" },
         specimen("Result status", h("div", { class: "row" }, Core.STATUS_ORDER.map((s) => statusBadge(s)))),
         specimen("Result status, short (tables)", h("div", { class: "row" }, Core.STATUS_ORDER.map((s) => statusBadge(s, { short: true })))),
         specimen("Route", h("div", { class: "row" }, Core.ROUTE_ORDER.map(routeBadge))),
@@ -114,7 +114,7 @@ registerPage({
         specimen("Explanation source", h("div", { class: "row" }, Object.keys(Core.SOURCE).map(sourceBadge))),
         specimen("Method", h("div", { class: "row" }, methodBadge()))) }),
 
-      card({ title: "Buttons", body: h("div", { class: "stack" },
+      card({ level: 3, title: "Buttons", body: h("div", { class: "stack" },
         specimen("Variants", h("div", { class: "row" },
           button({ label: "Primary", variant: "primary", icon: "download" }),
           button({ label: "Secondary" }), button({ label: "Danger", variant: "danger" }),
@@ -130,25 +130,25 @@ registerPage({
         statCard({ icon: "check-check", tone: "pass", label: "Clear", value: Core.number(CLAIMS.filter((c) => c.route.route === "CLEAR").length), caption: "No finding" }),
       ])),
 
-      card({ title: "Callouts", body: h("div", { class: "stack" },
+      card({ level: 3, title: "Callouts", body: h("div", { class: "stack" },
         callout({ tone: "info", icon: "info", title: "Information", text: "Neutral context for the reviewer." }),
         callout({ tone: "unknown", icon: "shield-alert", title: "Flagged for injection", text: "Instruction-like text was found; this claim's text never reaches the model." }),
         callout({ tone: "fail", icon: "alert-triangle", title: "Audit chain invalid", text: "A broken link was found." })) }),
 
-      sample ? card({ title: "Life cycle", meta: sample.claim.claim_id, body:
+      sample ? card({ level: 3, title: "Life cycle", meta: sample.claim.claim_id, body:
         lifecycleStrip(Core.lifecycle(sample, decisions()), { label: `Life cycle of ${sample.claim.claim_id}` }) }) : null,
 
-      sample ? card({ title: "Check grid", meta: sample.claim.claim_id, body: checkGrid(sample.results) }) : null,
+      sample ? card({ level: 3, title: "Check grid", meta: sample.claim.claim_id, body: checkGrid(sample.results) }) : null,
 
       typeScale(),
       ...signature(sample, fail, specimen),
 
-      fail ? card({ title: "Evidence table", meta: `${fail.rule_id} on ${fail.claim_id}`, body: evidenceTable(fail.evidence, sample.claim) }) : null,
+      fail ? card({ level: 3, title: "Evidence table", meta: `${fail.rule_id} on ${fail.claim_id}`, body: evidenceTable(fail.evidence, sample.claim) }) : null,
 
-      card({ title: "Bars", body: bars(Core.ROUTE_ORDER.map((r) => ({
+      card({ level: 3, title: "Bars", body: bars(Core.ROUTE_ORDER.map((r) => ({
         label: Core.ROUTE[r].label, value: CLAIMS.filter((c) => c.route.route === r).length, tone: Core.ROUTE[r].tone }))) }),
 
-      card({ title: "Table, filter bar and side panel", flush: true, body: h("div", {},
+      card({ level: 3, title: "Table, filter bar and side panel", flush: true, body: h("div", {},
         h("div", { class: "card__body" }, filterBar([{ label: "Route", value: "", options: [["", "All routes"], ...Core.ROUTE_ORDER.map((r) => [r, Core.ROUTE[r].label])], onChange: () => {} }], "5 of 5 claims")),
         table({ caption: "Sample claims", rows: CLAIMS.slice(0, 5),
           columns: [
@@ -158,12 +158,12 @@ registerPage({
           ],
           onRowClick: (c) => openPanel(c.claim.claim_id, kv([["Route", routeBadge(c.route.route)], ["Submitted", Core.date(c.claim.submission_date)]])) })) }),
 
-      card({ title: "Tabs", body: tabs("components", [
+      card({ level: 3, title: "Tabs", body: tabs("components", [
         { key: "a", label: "First", count: 2, render: () => h("p", { text: "First tab content." }) },
         { key: "b", label: "Second", render: () => h("p", { text: "Second tab content." }) }]) }),
 
-      card({ title: "Key / value", body: kv([["Run", DATA.run ? h("span", { class: "mono", text: DATA.run.run_id }) : null], ["Generated from", DATA.sources.results]]) }),
+      card({ level: 3, title: "Key / value", body: kv([["Run", DATA.run ? h("span", { class: "mono", text: DATA.run.run_id }) : null], ["Generated from", DATA.sources.results]]) }),
 
-      card({ title: "Empty state", body: emptyState({ icon: "search", title: "Nothing matches", text: "Change or clear the filters." }) }));
+      card({ level: 3, title: "Empty state", body: emptyState({ icon: "search", title: "Nothing matches", text: "Change or clear the filters." }) }));
   },
 });

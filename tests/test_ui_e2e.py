@@ -94,9 +94,36 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(self.out["keyboard"]["firstStop"], "Skip to content")
         self.assertEqual(self.out["keyboard"]["afterSkip"], "content")
 
-    def test_no_page_scrolls_sideways_at_1280px(self):
-        for key, overflow in self.out["narrow"].items():
-            self.assertLessEqual(overflow, 0, key)
+    def test_no_page_scrolls_sideways_at_any_width(self):
+        self.assertEqual(sorted(self.out["narrow"], key=int), ["375", "768", "1280", "1440"])
+        for width, pages in self.out["narrow"].items():
+            for key, overflow in pages.items():
+                if not key.endswith("(wide)"):
+                    self.assertLessEqual(overflow, 0, f"{key} at {width} px: {pages.get(key + ' (wide)')}")
+
+    def test_below_1100px_the_sidebar_is_a_drawer(self):
+        d = self.out["drawer"]
+        self.assertTrue(d["buttonShown"])
+        # Closed: out of reach of the keyboard, and the page is not inert.
+        self.assertEqual((d["closed"]["expanded"], d["closed"]["sidebarInert"], d["closed"]["mainInert"]), ("false", True, False))
+        # Open: the page behind is inert and the focus is on the current page's link.
+        self.assertEqual((d["open"]["expanded"], d["open"]["sidebarInert"], d["open"]["mainInert"]), ("true", False, True))
+        self.assertTrue(d["open"]["focused"].startswith("Review Queue"))
+        # Escape closes it and gives the focus back to the menu button.
+        self.assertEqual((d["afterEscape"]["expanded"], d["afterEscape"]["focused"]), ("false", "menu"))
+        # A link closes it.
+        self.assertEqual((d["afterLink"]["hash"][:9], d["afterLink"]["expanded"], d["afterLink"]["mainInert"]), ("#/claims", "false", False))
+        self.assertEqual(d["wide"], {"inert": False, "buttonShown": False})
+
+    def test_focus_moves_between_the_panes(self):
+        self.assertEqual(self.out["kb"]["escape"], {"into": "finding-R003", "back": "opt-R003"})
+        t = self.out["stackedThread"]
+        self.assertTrue(t["focusedPath"] and t["focusedPath"].startswith("/coverage"), t)
+        self.assertTrue(t["back"])
+
+    def test_tabs_move_with_the_arrow_keys(self):
+        self.assertEqual(self.out["tabs"], {"focused": "tab-components-b", "selected": "true", "stops": 1,
+                                            "panel": "tab-components-b"})
 
     def test_offline(self):
         self.assertEqual(self.out["network"], [])

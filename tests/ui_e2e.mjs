@@ -105,6 +105,13 @@ const A11Y = `(() => {
   if (dup.length) problems.push('duplicate ids ' + [...new Set(dup)].join(','));
   if (!document.documentElement.lang) problems.push('no lang');
   if (document.querySelectorAll('h1').length !== 1) problems.push(document.querySelectorAll('h1').length + ' h1');
+  // Headings never skip a level going down (h1 then h3).
+  let level = 0;
+  for (const el of document.querySelectorAll('h1, h2, h3, h4, h5, h6')) {
+    const n = Number(el.tagName[1]);
+    if (n > level + 1) problems.push('heading h' + n + ' after h' + level + ': ' + el.textContent.trim().slice(0, 40));
+    level = n;
+  }
   return problems;
 })()`;
 
@@ -139,7 +146,7 @@ const text = (sel) => evaluate(`(document.querySelector(${JSON.stringify(sel)}) 
 
 // Real key presses and typing, for the keyboard-only flow.
 const KEYS = { Tab: ["Tab", 9], Enter: ["Enter", 13, "\r"], " ": ["Space", 32, " "], j: ["KeyJ", 74, "j"], k: ["KeyK", 75, "k"],
-  End: ["End", 35] };
+  End: ["End", 35], Escape: ["Escape", 27], ArrowRight: ["ArrowRight", 39] };
 async function press(key, modifiers = 0) {
   const [code, vk, chars] = KEYS[key];
   await page("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode: vk, modifiers, text: chars });
@@ -201,14 +208,61 @@ try {
   await evaluate("document.activeElement.click()");
   out.keyboard.afterSkip = await evaluate("document.activeElement.id");
 
-  // ---- 1280 px: no page scrolls sideways
-  await page("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  // ---- 375, 768, 1280 and 1440 px: no page scrolls sideways
   out.narrow = {};
-  for (const key of ["dashboard", "queue", "claims", "claims/CG-785C09BD9CC8", "audit", "rules", "rules/R013", "evaluation", "settings"]) {
-    await goTo(`#/${key}`);
-    out.narrow[key] = await evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth");
+  for (const width of [375, 768, 1280, 1440]) {
+    await page("Emulation.setDeviceMetricsOverride", { width, height: 812, deviceScaleFactor: 1, mobile: false });
+    out.narrow[width] = {};
+    for (const key of ["dashboard", "queue", "claims", "claims/CG-785C09BD9CC8", "audit", "rules", "rules/R013", "evaluation", "settings", "components"]) {
+      await goTo(`#/${key}`);
+      out.narrow[width][key] = await evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth");
+      // What sticks out, to say why in the test's message.
+      if (out.narrow[width][key] > 0) out.narrow[width][`${key} (wide)`] = await evaluate(`[...document.querySelectorAll('body *')]
+        .filter((e) => e.getBoundingClientRect().right > document.documentElement.clientWidth + 1).slice(0, 6)
+        .map((e) => e.tagName.toLowerCase() + '.' + e.className)`);
+    }
   }
+
+  // ---- below 1100 px the sidebar is a drawer
+  const drawerState = () => evaluate(`({ expanded: document.querySelector('.menu-btn').getAttribute('aria-expanded'),
+    sidebarInert: document.getElementById('sidebar').inert, mainInert: document.querySelector('.main').inert,
+    focused: document.activeElement.classList.contains('menu-btn') ? 'menu' : (document.activeElement.textContent || '').trim() })`);
+  await page("Emulation.setDeviceMetricsOverride", { width: 375, height: 812, deviceScaleFactor: 1, mobile: false });
+  await goTo("#/queue");
+  out.drawer = { closed: await drawerState(), buttonShown: await evaluate("getComputedStyle(document.querySelector('.menu-btn')).display !== 'none'") };
+  await evaluate("document.querySelector('.menu-btn').focus()");
+  await press("Enter");
+  await sleep(100);
+  out.drawer.open = await drawerState();
+  await press("Escape");
+  await sleep(100);
+  out.drawer.afterEscape = await drawerState();
+  await evaluate("document.querySelector('.menu-btn').click()");
+  await sleep(100);
+  await evaluate("[...document.querySelectorAll('.nav__item')].find(a => a.textContent.includes('Claims')).click()");
+  await sleep(250);
+  out.drawer.afterLink = { hash: await evaluate("location.hash"), ...(await drawerState()) };
+  // Stacked panes: "show in claim" takes the focus to the field, Escape brings it back.
+  await goTo("#/claims/CG-785C09BD9CC8");
+  await evaluate("document.querySelector('#finding-R003 .chip').focus()");
+  await press("Enter");
+  await sleep(100);
+  out.stackedThread = { focusedPath: await evaluate("document.activeElement.dataset.path || null") };
+  await press("Escape");
+  out.stackedThread.back = await evaluate("document.activeElement.classList.contains('chip')");
+  await evaluate("document.activeElement.click()");  // un-press it
+  await page("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await goTo("#/queue");
+  out.drawer.wide = await evaluate("({ inert: document.getElementById('sidebar').inert, buttonShown: getComputedStyle(document.querySelector('.menu-btn')).display !== 'none' })");
   await page("Emulation.clearDeviceMetricsOverride");
+
+  // ---- tabs: one stop, the arrow keys move and open
+  await goTo("#/components");
+  await evaluate("document.querySelector('[role=tab][aria-selected=true]').focus()");
+  await press("ArrowRight");
+  out.tabs = await evaluate(`({ focused: document.activeElement.id, selected: document.activeElement.getAttribute('aria-selected'),
+    stops: document.querySelectorAll('[role=tab][tabindex="0"]').length,
+    panel: document.querySelector('[role=tabpanel]').getAttribute('aria-labelledby') })`);
   await goTo("#/dashboard");
   out.dashboard = { lifecycle: await text(".lifecycle"), stats: await text(".grid--4"), rejected: await text("#sec-rejected"),
     page: await text(".content"), sidebar: await text(".sidebar") };
@@ -345,6 +399,12 @@ try {
   out.kb.afterJ = { selected: await selectedRule(), focused: await focused() };
   await press("k");
   out.kb.afterK = await selectedRule();
+  // Enter moves into the finding, Escape back to the list.
+  await evaluate("document.getElementById('opt-R003').focus()");
+  await press("Enter");
+  out.kb.escape = { into: await focused() };
+  await press("Escape");
+  out.kb.escape.back = await focused();
   const decide = async (rule, actionLabel, reason, name) => {
     for (let n = 0; n < 20 && (await selectedRule()) !== rule; n++) await press("j");
     await evaluate(`document.getElementById('opt-${rule}').focus()`);

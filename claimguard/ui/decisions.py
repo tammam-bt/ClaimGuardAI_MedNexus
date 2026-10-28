@@ -110,10 +110,12 @@ def check(events, directory, claims, results, corrections=None):
     return problems
 
 
-def append_decisions(decisions_path, log, *, claims_path, results_path, directory, anchor=None, corrections=None):
+def append_decisions(decisions_path, log, *, claims_path, results_path, directory, anchor=None, corrections=None,
+                     command=COMMAND):
     """Check, then append. Returns a summary; raises ValueError listing every
     problem, having written nothing. directory is {actor: role}: required,
-    since without one there is no role to check."""
+    since without one there is no role to check. command is the one the
+    append_performed event names."""
     events = load_jsonl(decisions_path)
     claims = claims_by_id(claims_path)
     results = load_jsonl(results_path)
@@ -123,7 +125,7 @@ def append_decisions(decisions_path, log, *, claims_path, results_path, director
     anchor = anchor or chain.default_anchor(log)
     recorded = [row["event"] for row in load_jsonl(log)] if Path(log).exists() else []
     new = [e for e in events if e not in recorded]
-    head, count = (chain.append(log, new, anchor, performed=(COMMAND, chain.file_sha256(decisions_path)))
+    head, count = (chain.append(log, new, anchor, performed=(command, chain.file_sha256(decisions_path)))
                    if new else chain.verify(log, anchor))
     return {"read": len(events), "appended": len(new), "already_in_chain": len(events) - len(new),
             "events_in_chain": count, "head": head}

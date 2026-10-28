@@ -13,7 +13,9 @@ import socket
 import tempfile
 import threading
 import unittest
+from collections import Counter
 from pathlib import Path
+from unittest import mock
 
 from claimguard._pack import load_jsonl
 from claimguard.audit import chain
@@ -23,7 +25,7 @@ from claimguard.run import main as run_main
 from claimguard.ui import build, render
 from claimguard.ui.decisions import main as decisions_main
 from claimguard.ui.serve import MAX_BODY, App, Run, main as serve_main, make_server
-from claimguard.ui.signin import SignIn, hash_password, load_users, set_password
+from claimguard.ui.signin import SignIn, hash_password, load_users, main as signin_main, set_password
 
 ROOT = Path(__file__).resolve().parents[1]
 DEV = ROOT / "data" / "development"
@@ -264,7 +266,10 @@ class DecisionTests(ServerCase):
         self.assertEqual((answer["appended"], answer["already_in_chain"]), (2, 0))
         head, count = chain.verify(self.log, chain.default_anchor(self.log))
         self.assertEqual((answer["head"], answer["events_in_chain"]), (head, count))
-        self.assertIn("ready", answer["verdict"])
+        # The gate's verdict as counts, which the page words in its own labels.
+        rows = judge(self.results, DEV / "claims.jsonl", self.log, DIRECTORY)
+        self.assertEqual(answer["gate"], {"claims": len(rows), "ready": sum(r["ready"] for r in rows),
+                                          "blocked": dict(Counter(r["state"] for r in rows if not r["ready"]))})
         performed = load_jsonl(self.log)[-1]["event"]
         self.assertEqual(performed["command"], "claimguard.ui.serve")
         self.assertEqual(performed["events"], 2)
@@ -435,6 +440,24 @@ class SignInTests(ServerCase):
             self.assertIn("SameSite=Strict", cookie)
             self.session = cookie.split(";")[0].split("=", 1)[1]
         return code, json.loads(raw)
+
+    def test_the_password_command_checks_before_it_asks(self):
+        directory = self.dir / "actors.json"
+        directory.write_text(json.dumps(DIRECTORY), encoding="utf-8")
+        damaged = self.dir / "damaged.json"
+        damaged.write_text("not json", encoding="utf-8")
+        for users, name, words in ((self.users, "Ghost", "not in the actor directory"),
+                                   (damaged, "Reviewer 02", "not a readable JSON file")):
+            with mock.patch("claimguard.ui.signin.getpass.getpass") as asked, \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(signin_main(["--users", str(users), "--directory", str(directory), "--name", name]), 1)
+            asked.assert_not_called()
+            self.assertIn(words, out.getvalue())
+        with mock.patch("claimguard.ui.signin.getpass.getpass", return_value=PASSWORD), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(signin_main(["--users", str(self.users), "--directory", str(directory),
+                                          "--name", "Reviewer 02"]), 0)
+        self.assertEqual(sorted(load_users(self.users, DIRECTORY)), ["Reviewer 01", "Reviewer 02"])
 
     def test_password_file_rules(self):
         with self.assertRaises(ValueError):

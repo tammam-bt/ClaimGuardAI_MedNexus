@@ -114,6 +114,23 @@ const Server = {
   // the server now has them: a saved decision then reads "In the audit log".
   reloadWith(notice) { Store.set("notice", notice); location.reload(); },
 };
+// The gate's verdict after a save ({ claims, ready, blocked: { state: n } },
+// claimguard.review.gate), in the page's own words: Core.OUTCOME's labels,
+// and the states only the gate has.
+const GATE_STATE = { rejected: "Rejected at ingestion", not_checked: "Not checked", invalid_versions: "Versions that do not follow" };
+function gateLine(g) {
+  if (!g) return "";
+  if (g.error) return `The gate cannot judge: ${g.error}`;
+  const rank = (s) => { const i = Core.OUTCOME_ORDER.indexOf(s); return i < 0 ? Core.OUTCOME_ORDER.length : i; };
+  const blocked = Object.entries(g.blocked || {}).sort(([a], [b]) => rank(a) - rank(b))
+    .map(([s, n]) => `${Core.number(n)} ${((Core.OUTCOME[s] || {}).label || GATE_STATE[s] || Core.humanize(s)).toLowerCase()}`);
+  return `Gate: ${Core.number(g.ready)} of ${Core.plural(g.claims, "claim")} ready` + (blocked.length ? `; blocked: ${blocked.join(", ")}.` : ".");
+}
+// "R008 Fail → Pass", as every status is named on the page.
+function statusChange(c) {
+  const label = (s) => (Core.STATUS[s] || { label: s }).label;
+  return `${c.rule_id} ${label(c.before)} → ${label(c.after)}`;
+}
 
 // --------------------------------------------------------------- elements
 function h(tag, props, ...children) {
@@ -806,7 +823,7 @@ function draftActions() {
       State.save();
       Server.reloadWith({ title: `Saved to the audit log: ${Core.plural(r.data.appended, "decision")}` +
           (r.data.already_in_chain ? `, ${r.data.already_in_chain} already there` : ""),
-        text: `The audit log holds ${Core.plural(r.data.events_in_chain, "event")}; head ${Core.shortHash(r.data.head)}. ${r.data.verdict || ""}` });
+        text: `The audit log holds ${Core.plural(r.data.events_in_chain, "event")}; head ${Core.shortHash(r.data.head)}. ${gateLine(r.data.gate)}` });
       return;
     }
     save.disabled = false;

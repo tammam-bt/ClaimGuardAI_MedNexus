@@ -3,7 +3,9 @@
     python -m claimguard.ui.signin --users users.json --directory actors.json --name "Reviewer 01"
 
 sets one person's password, asked twice and never taken from the command
-line, in a JSON file of scrypt hashes. Start claimguard.ui.serve with
+line, in a JSON file of scrypt hashes. It is typed at the keyboard: on
+Windows the prompt reads the console, so a password cannot be piped in. The
+name and the file are checked before the prompt. Start claimguard.ui.serve with
 --users users.json and every save then needs a signed-in person: a decision
 is refused unless its actor is that person, and a correction is recorded
 under their name. Roles still come from the actor directory only; a name
@@ -150,6 +152,10 @@ def main(argv=None):
     a = p.parse_args(argv)
     try:
         directory = load_directory(a.directory)
+        if a.name not in directory:  # before the prompt, so a mistyped name costs no typing
+            raise ValueError("this name is not in the actor directory, so it has no role")
+        if Path(a.users).exists():
+            load_users(a.users, directory)  # a damaged file is refused before the prompt too
         password = getpass.getpass(f"Password for {a.name} (at least {MIN_LENGTH} characters): ")
         if password != getpass.getpass("The same password again: "):
             raise ValueError("the two passwords differ")

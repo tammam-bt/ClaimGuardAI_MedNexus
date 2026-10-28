@@ -65,12 +65,12 @@ Every step of `.github/workflows/ci.yml`, plus the audit commands, run on Window
 |---|---|---|
 | `src/validate_pack.py` | PASS | PASS |
 | Tracked `.env*` files but `.env.example` | none | none |
-| `python -m unittest discover -s tests` with `REQUIRE_E2E=1` | 605 OK | 605 OK |
+| `python -m unittest discover -s tests` with `REQUIRE_E2E=1` | 606 OK | 606 OK |
 | A rule reads the wall clock | no | no |
 | `status_accuracy`, development · validation · stress | 1.0 · 1.0 · 1.0 (0 FP, 0 FN, 0 not implemented) | same |
 | `tamper_demo` on a run's log | 8 of 8 as stated | 8 of 8 as stated |
 
-Version 2 had 565 tests; Track C adds 35 server tests (`tests/test_ui_serve.py`) and 5 end-to-end tests against a live server (`tests/test_ui_serve_e2e.py`). The snapshot is not a git checkout, so the 4 tests that ask git which files would be committed (`test_rbac_and_secrets.SecretsTests`) skipped there; they pass in the working checkout, new files included.
+Version 2 had 565 tests; Track C adds 36 server tests (`tests/test_ui_serve.py`) and 5 end-to-end tests against a live server (`tests/test_ui_serve_e2e.py`). The snapshot is not a git checkout, so the 4 tests that ask git which files would be committed (`test_rbac_and_secrets.SecretsTests`) skipped there; they pass in the working checkout, new files included.
 
 **Security review of the server (B5).** Each check of `docs/THREAT_MODEL.md` was tried from outside with a raw HTTP client, and three gaps were found and fixed before this note:
 - a body nested too deeply for Python's JSON parser raised `RecursionError`, which dropped the connection: now a 400;

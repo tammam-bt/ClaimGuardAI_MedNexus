@@ -77,6 +77,9 @@ class ServedEndToEndTests(unittest.TestCase):
         self.assertEqual(self.out["saveLabel"], "Save to the audit log (2)")
         saved = self.out["saved"]
         self.assertEqual(saved["notice"], "Saved to the audit log: 2 decisions")
+        # The gate's verdict in the page's words, never its codes.
+        self.assertRegex(saved["text"], r"Gate: \d+ of 400 claims ready; blocked: .*correction needed")
+        self.assertNotIn("_", saved["text"])
         self.assertEqual(saved["drafts"], 0)
         self.assertTrue(saved["inLog"])
         events = [r["event"] for r in load_jsonl(self.log)][self.before:]
@@ -98,7 +101,8 @@ class ServedEndToEndTests(unittest.TestCase):
         self.assertEqual(self.out["correctionButton"], "Recheck as a new version")
         corrected = self.out["corrected"]
         self.assertEqual(corrected["notice"], "CG-B39790AC3604 v2 recorded and rechecked")
-        self.assertIn("R008 FAIL → PASS", corrected["text"])
+        self.assertIn("R008 Fail → Pass, R009 Unable to assess → Fail", corrected["text"])
+        self.assertNotIn("_", corrected["text"])
         self.assertEqual(corrected["deciding"], "Deciding on version 2")
         self.assertTrue((self.corrections / "CG-B39790AC3604.v2.json").exists())
         rows = judge(self.results, DEV / "claims.jsonl", self.log, DIRECTORY, corrections=self.corrections)

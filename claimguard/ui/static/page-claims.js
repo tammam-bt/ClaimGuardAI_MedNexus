@@ -632,11 +632,11 @@ const ClaimDetail = (function () {
         const r = await Server.call("POST", "/api/corrections", { claim_id: id, parent_hash: cur.input_hash, changes,
           actor: State.reviewer, reason: reason.value });
         if (r.ok) {
-          const moved = (r.data.status_changes || []).map((c) => `${c.rule_id} ${c.before} → ${c.after}`).join(", ");
+          const moved = (r.data.status_changes || []).map(statusChange).join(", ");
           const errors = (r.data.rule_errors || []).map((e) => e.rule_id);
           Server.reloadWith({ title: `${id} v${r.data.version} recorded and rechecked`,
             text: `${moved ? `Status changes: ${moved}.` : "No status changed."}` +
-              `${errors.length ? ` A rule failed during the recheck (${errors.join(", ")}): its result is Unable to assess.` : ""} ${r.data.verdict || ""}` });
+              `${errors.length ? ` A rule failed during the recheck (${errors.join(", ")}): its result is Unable to assess.` : ""} ${gateLine(r.data.gate)}` });
           return;
         }
         submit.disabled = false;

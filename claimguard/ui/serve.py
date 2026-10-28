@@ -49,6 +49,7 @@ import socket
 import sys
 import threading
 import traceback
+from collections import Counter
 from dataclasses import dataclass
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -60,7 +61,7 @@ from claimguard.audit import chain
 from claimguard.guards.rbac import load_directory
 from claimguard.ingest.jsonl import claims_by_id
 from claimguard.review.correct import correct_claim, latest_version
-from claimguard.review.gate import GateError, judge, verdict
+from claimguard.review.gate import GateError, judge
 from claimguard.ui.bundle import build
 from claimguard.ui.decisions import DecisionsRefused, append_events
 from claimguard.ui.page import render
@@ -151,13 +152,17 @@ class App:
         return {"server": COMMAND, "audit": audit, "corrections": bool(r.corrections),
                 "signin": {"user": user, "role": self.signin.role(user) if user else None} if self.signin else None}
 
-    def _verdict(self):
+    def _gate(self):
+        """The gate's verdict after a write, as counts: the page words them in
+        its own labels. {"error": ...} when the gate cannot judge."""
         r = self.run
         try:
-            return verdict(judge(r.results, r.claims, r.log, r.directory, anchor=r.anchor, corrections=r.corrections,
-                                 expect=r.expect))
+            rows = judge(r.results, r.claims, r.log, r.directory, anchor=r.anchor, corrections=r.corrections,
+                         expect=r.expect)
         except (GateError, ValueError) as e:
-            return f"The gate cannot judge: {e}"
+            return {"error": str(e)}
+        blocked = Counter(row["state"] for row in rows if not row["ready"])
+        return {"claims": len(rows), "ready": len(rows) - sum(blocked.values()), "blocked": dict(blocked)}
 
     def save_decisions(self, body, body_sha256, user=None):
         """(HTTP status, answer). The same checks and append as the command line."""
@@ -183,7 +188,7 @@ class App:
                 return 422, {"error": "No decision was saved.", "problems": e.problems}
             except (ValueError, OSError) as e:  # AuditError is a ValueError
                 return 409, {"error": f"No decision was saved: {e}"}
-            return 200, {**summary, "verdict": self._verdict()}
+            return 200, {**summary, "gate": self._gate()}
 
     def save_correction(self, body, body_sha256, user=None):
         """(HTTP status, answer). python -m claimguard.review.correct, after
@@ -217,7 +222,7 @@ class App:
                 return 422, {"error": "Correction refused: the changes are not JSON Patch operations"}
             return 200, {"claim_id": claim_id, "version": record["version"], "input_hash": record["input_hash"],
                          "status_changes": record["status_changes"], "rule_errors": record["rule_errors"],
-                         "verdict": self._verdict()}
+                         "gate": self._gate()}
 
 
 class Handler(BaseHTTPRequestHandler):

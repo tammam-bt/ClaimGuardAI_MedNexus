@@ -803,6 +803,7 @@ button.timeline__body:hover .small { text-decoration: underline; }
   animation: draw var(--duration-slow) var(--ease-standard) backwards;
 }
 .stack--tight { gap: var(--space-2); }
+.problems { margin: 0; padding-left: var(--space-5); }
 .plain-list { margin: var(--space-2) 0 0; padding-left: var(--space-5); }
 .claim-head__title .fingerprint { margin-left: var(--space-2); }
 .claim-head__nav { margin-left: auto; }

@@ -95,6 +95,8 @@ const Shell = (function () {
   }
 
   function roleSwitch() {
+    // Signed in on the local server (B4), the role is the server's.
+    if (Server.user) return h("span", { class: "row small muted role-switch", text: `Signed in: ${Server.user}` });
     // A demonstration switch, not access control: the page has no login.
     // On a narrow screen it reads "Demo" beside the select (named "Role").
     return h("label", { class: "row small muted role-switch" }, h("span", {}, "Demo", h("span", { class: "role-switch__long", text: ": view as" })),
@@ -181,5 +183,7 @@ const Shell = (function () {
 
 applyTheme();  // before the first draw, so the page never flashes the other theme
 State.onChange(applyTheme);
-Shell.build();
-Shell.render();
+function start() { Shell.build(); Shell.render(); }
+// Served by the local server, the page asks it first, so the first draw
+// already knows whether drafts can be saved from here. As a file: at once.
+if (Server.token) Server.start().then(start); else start();

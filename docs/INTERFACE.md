@@ -1,6 +1,6 @@
 # The review interface
 
-One HTML file, built from a run's outputs, that a claims reviewer opens in a browser. It works offline, with no server, no key and no package. It shows only what the run produced: when a source is missing, the page says so instead of inventing numbers.
+One HTML file, built from a run's outputs, that a claims reviewer opens in a browser. It works offline, with no server, no key and no package. Served by the optional local server (*The local server*, below), the same page also saves decisions and corrections without a terminal. It shows only what the run produced: when a source is missing, the page says so instead of inventing numbers.
 
 ## Build it
 
@@ -91,6 +91,35 @@ If the latest version still has findings, the claim is *Rechecked as a new versi
 - each decision is taken on that version's `input_hash`, so a decision on an older version no longer counts;
 - append the downloaded decisions with the same folder: `python -m claimguard.ui.decisions ... --corrections outputs/corrections`. Without it, the command judges the claim as received and refuses decisions on the new version; with it, it refuses decisions on any older version.
 
+## The local server: no download, no command (Track C)
+
+The same page, served from this machine, saves decisions and rechecks corrections itself:
+
+```bash
+python -m claimguard.ui.serve --results outputs/dev_predictions.jsonl --claims data/development/claims.jsonl \
+    --log outputs/audit.jsonl --directory actors.json --corrections outputs/corrections \
+    [--gold data/development/expected_results.jsonl] [--users users.json] [--port 8765] \
+    [--expect-count N --expect-head HASH]
+```
+
+It prints one address, `http://127.0.0.1:8765/?token=…`, to open in a browser on this machine. An administrator starts it, from the account that owns the run's files.
+
+- **Save to the audit log.** The drafts banner (Queue, Claims, each claim), the dashboard's "Your drafts" and Settings offer *Save to the audit log (N)* beside *Download decisions*. The server runs the same checks and append as `python -m claimguard.ui.decisions`, inside the writer lock. On success the page reloads from the files: each decision reads *In the audit log*, and a notice gives the log's new count and head and the gate's verdict. A refusal lists every problem, saves nothing, and keeps every draft.
+- **Correct this claim.** On a claim, pick a field, enter its new value (a number stays a number), add as many changes as needed, give a reason. With the server, *Recheck as a new version* runs `python -m claimguard.review.correct` with `--log`: the page reloads on the new version, with the status changes. It is refused if the claim gained a version since the page was loaded. Without the server, the same card downloads the patch file that command reads.
+- **Sign-in (optional, B4).** With `--users`, every save needs a signed-in person (Settings, *Local server*): each decision's actor must be that person, and a correction is recorded under their name. Set a password with `python -m claimguard.ui.signin --users users.json --directory actors.json --name "Reviewer 01"` (asked twice, at least 12 characters, stored as an scrypt hash). It proves who saved only if reviewers cannot use the account that runs the server (`docs/THREAT_MODEL.md`).
+- **The offline file is unchanged.** The page `python -m claimguard.ui` writes has no token and never calls anything; its policy still has no `connect-src`. The served page adds only `connect-src 'self'`.
+- `append_performed` names `claimguard.ui.serve`, the OS user running it and the SHA-256 of the request body. When the server stops, it prints the count and head to record outside this machine.
+
+| Request | Does |
+|---|---|
+| `GET /` | the page, rebuilt from the run's files whenever they change |
+| `GET /api/status` | the audit log's verified count and head; whether corrections and sign-in are on |
+| `POST /api/decisions` | `{"decisions": [...]}`: check, then append |
+| `POST /api/corrections` | `{"claim_id", "parent_hash", "changes", "actor", "reason"}`: correct and recheck |
+| `POST /api/signin`, `/api/signout` | only with `--users` |
+
+Every request needs `Host` to be `127.0.0.1:<port>` or `localhost:<port>`. The page needs the launch token (moved from the address to an `HttpOnly`, `SameSite=Strict` cookie); every API call sends it in `X-ClaimGuard-Token`. Every `POST` needs `Origin` to be this server, `application/json` and at most 1 MiB. `docs/THREAT_MODEL.md` says what each check prevents; `tests/test_ui_serve.py` and `tests/test_ui_serve_e2e.py` prove them.
+
 ## The gate: what may proceed
 
 The page shows each claim's state but enforces nothing: decisions are drafts until appended. The gate enforces it:
@@ -113,13 +142,13 @@ python -m claimguard.review.gate --results outputs/dev_predictions.jsonl --claim
 
 ## Roles
 
-`View as` in the top bar switches between Reviewer and Admin, using the permission matrix of `claimguard.guards.rbac` (shown in Settings). There is no login (doc 10): the role only changes what the page shows. The permission that counts is checked against the actor directory (`--directory`) when decisions are appended and when a correction is recorded.
+`View as` in the top bar switches between Reviewer and Admin, using the permission matrix of `claimguard.guards.rbac` (shown in Settings). There is no login on the offline page (doc 10): the role only changes what the page shows. Signed in on the local server, the top bar shows the signed-in name instead, and the role is the directory's. The permission that counts is checked against the actor directory (`--directory`) when decisions are appended and when a correction is recorded.
 
 ## Security
 
 - Claim text, document text and explanations are always inserted as text, never parsed as HTML. The page builds every element itself; no HTML string is ever parsed into it.
 - The data sits in a `<script type="application/json">` element with `<`, `>`, `&`, U+2028 and U+2029 escaped, so no claim text can close it.
-- The page loads nothing from the network and sends nothing, and its Content-Security-Policy makes the browser enforce it: no request, image, font, frame or form can leave the page. The decisions download still works.
+- The page loads nothing from the network and sends nothing, and its Content-Security-Policy makes the browser enforce it: no request, image, font, frame or form can leave the page. The decisions download still works. Served by the local server, the policy adds `connect-src 'self'`, so the page can talk to that server and nothing else.
 - The API key is never written to the run's files, so it is never part of the page.
 - Claims flagged by the injection pre-filter are marked, keep their 15 results, and their text never reaches the model.
 - An explanation the watchdog rejected is labelled *Rule's explanation (AI answer rejected)*, and the reason is given in plain words: no answer in time, the model service failed, an unreadable answer, an incomplete answer or one citing something it was not given, a failed check called passed, clinical advice, or another rule named. The rejected answer itself is never shown. Settings lists these reasons and what the model never sees (claim number, notes, document text, and patient and member numbers, replaced by placeholders such as `[patient-1]`).
@@ -135,6 +164,8 @@ python -m claimguard.review.gate --results outputs/dev_predictions.jsonl --claim
 | A claim's stage, computed in the page, matches `claimguard.review.routing.outstanding` | `tests/test_ui_core.py` (Node) |
 | A claim's outcome in the page matches the gate's | `tests/test_ui_core.py` (Node) |
 | The page carries a Content-Security-Policy; the download still works under it; any refusal counts as a page error | `tests/test_ui_bundle.py`, `tests/test_ui_e2e.py` |
+| The local server refuses a missing or wrong token, a wrong Host or Origin, a body that is not JSON or over 1 MiB, and a second writer; decisions saved through it give the same gate result as the command line | `tests/test_ui_serve.py` |
+| A reviewer decides, saves and sees *In the audit log* against a live server; a refused save keeps its draft; a correction is rechecked | `tests/test_ui_serve_e2e.py` (headless Chrome) |
 | Every page draws with no JavaScript error, no unnamed control, no unlabelled field, no duplicate ID, one `h1`; the skip link is the first keyboard stop; nothing scrolls sideways at 1280 px; no network request; the decision flow, the queue, filters, roles and hostile text | `tests/test_ui_e2e.py` (headless Chrome) |
 
 The Node and Chrome tests are skipped where Node or Chrome is not installed.
@@ -147,6 +178,8 @@ The Node and Chrome tests are skipped where Node or Chrome is not installed.
 | `claimguard/ui/page.py` | inlines CSS, icons, data and scripts into one HTML file |
 | `claimguard/ui/decisions.py` | appends downloaded decisions to the chain, after checking them |
 | `claimguard/ui/apply.py` | one step: `decisions`, then the gate, then the page rebuilt |
+| `claimguard/ui/serve.py` | the local server: the page, `/api/status`, saving decisions and corrections (Track C) |
+| `claimguard/ui/signin.py` | optional sign-in for the server: scrypt password file, sessions, throttling (B4) |
 | `claimguard/review/correct.py` | correction → new version → recheck → `version_created` |
 | `claimguard/review/gate.py` | the gate: ready or blocked per claim, exit code; `outcome()` is the twin of `Core.outcome` |
 | `claimguard/review/feedback.py` | decisions summarized from the audit chain |
@@ -157,8 +190,8 @@ The Node and Chrome tests are skipped where Node or Chrome is not installed.
 
 ## Limits
 
-- No login: names and roles are self-declared (doc 10).
-- Drafts live in one browser until downloaded; another browser does not see them.
+- No login on the offline page: names and roles are self-declared (doc 10). The local server's sign-in is optional, and authenticates only under an account reviewers cannot use.
+- Drafts live in one browser until downloaded or saved through the local server; another browser does not see them.
 - No time series: one run has no history, so there are no trend lines.
 - Phase 2 is mock only: explanations are the rule's own text until the mentor gives the model key in a later phase and a live provider is wired (`claimguard/ai/provider.py`). With a live model, an explanation can name a patient or member only by its placeholder (`[patient-1]`); the finding's evidence still shows the real value.
-- The page shows the run it was built from; it cannot start a run. Rebuild after each run, decision append or correction.
+- The page shows the run it was built from; it cannot start a run. Rebuild after each run, decision append or correction made on the command line. The served page is rebuilt by the server whenever the files change.

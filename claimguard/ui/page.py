@@ -28,6 +28,11 @@ JS_FILES = (
     "main.js",
 )
 _MARKERS = ("/*@CSS@*/", "<!--@ICONS@-->", "@DATA@", "/*@JS@*/")
+# The page's policy sends nothing anywhere. Served by claimguard.ui.serve, it
+# may talk to that server and nothing else: connect-src 'self' is the only
+# difference, and the file written by python -m claimguard.ui never has it.
+OFFLINE_POLICY = "img-src data:; base-uri 'none'"
+SERVED_POLICY = "img-src data:; connect-src 'self'; base-uri 'none'"
 
 
 def _static(name):
@@ -38,11 +43,13 @@ def script():
     return "\n;\n".join(f"// ---- {name}\n{_static(name)}" for name in JS_FILES)
 
 
-def render(data):
+def render(data, *, served=False):
     template = _static("index.html")
-    for marker in _MARKERS:
+    for marker in _MARKERS + (OFFLINE_POLICY,):
         if template.count(marker) != 1:
             raise RuntimeError(f"static/index.html must contain {marker} exactly once")
+    if served:
+        template = template.replace(OFFLINE_POLICY, SERVED_POLICY)
     parts = {
         "/*@CSS@*/": _static("app.css"),
         "<!--@ICONS@-->": _static("icons.svg"),

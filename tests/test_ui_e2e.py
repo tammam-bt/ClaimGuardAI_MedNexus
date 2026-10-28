@@ -3,7 +3,8 @@
 Builds the page from a real run, then tests/ui_e2e.mjs drives it: every page
 draws without a JavaScript error, the decision flow works and records the
 audit format, and hostile claim text never runs. Skipped when Node or
-Chrome is not installed.
+Chrome is not installed, except with REQUIRE_E2E=1, as in CI: then a missing
+one fails the run, so the tests can never quietly not run.
 """
 import contextlib
 import io
@@ -231,6 +232,13 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(h["injectedImages"], 0)
         self.assertTrue(h["shownAsText"])
 
+
+
+@unittest.skipUnless(os.environ.get("REQUIRE_E2E") == "1", "REQUIRE_E2E is not set")
+class RequiredTests(unittest.TestCase):
+    def test_node_and_chrome_are_installed(self):
+        self.assertTrue(NODE, "REQUIRE_E2E=1 but Node is not installed: the e2e tests did not run")
+        self.assertTrue(CHROME, "REQUIRE_E2E=1 but Chrome is not installed: the e2e tests did not run")
 
 
 @unittest.skipUnless(NODE, "needs Node")

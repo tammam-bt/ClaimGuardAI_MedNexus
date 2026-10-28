@@ -143,6 +143,13 @@ class SecretsTests(unittest.TestCase):
                 hits.append(name)
         self.assertEqual(hits, [])
 
+    def test_no_env_file_but_the_example_would_be_committed(self):
+        # .gitignore ignores exactly .env, so .env.local, or a .env in any
+        # folder below the root, would be committed. CI runs the same check.
+        files = self.git("ls-files", "--cached", "--others", "--exclude-standard", "--",
+                         ":(glob)**/.env*", ":(glob)**/.env*/**").stdout.splitlines()
+        self.assertEqual(files, [".env.example"])
+
 
 if __name__ == "__main__":
     unittest.main()

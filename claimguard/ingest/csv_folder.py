@@ -25,7 +25,11 @@ as the contract check does. A file whose header differs is a file-level error
 record:
 
     csv                 a row of the claim cannot be read (wrong field count,
-                        not a number, not UTF-8, more than one coverage row)
+                        not a number, not UTF-8, a NUL character, more than
+                        one coverage row); or a row of a child file cannot be
+                        parsed at all, which rejects every claim: its
+                        claim_id is unreadable, so no claim can be shown to
+                        have all its rows (fail closed)
     duplicate_claim_id  the claim_id is on more than one claims.csv row; all
                         of them are rejected, since their child rows cannot
                         be told apart
@@ -49,11 +53,12 @@ from .contract import _SCHEMA, ContractError, check_claim
 from .jsonl import _SAFE_ID, IngestResult, Ingested, Provenance, _error, _sha256
 
 ADAPTER = "csv"
-ADAPTER_VERSION = "1.0.0"
+ADAPTER_VERSION = "1.1.0"
 
 _NESTED = ("coverage", "lines", "authorizations", "attachments")
 FILES = ("claims",) + _NESTED
 _NUMBER = re.compile(r"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?")
+_NUL = "\udc00"  # stands for a NUL character while parsing (see _read)
 
 
 def _types(node):
@@ -85,7 +90,11 @@ def _read(folder, name):
     # surrogateescape keeps invalid bytes visible per row instead of failing
     # the whole file.
     text = data.decode("utf-8", "surrogateescape").removeprefix("﻿")
-    reader = csv.reader(io.StringIO(text, newline=""))
+    # Python 3.10's csv module cannot read a NUL (3.11 can), so NUL becomes
+    # _NUL before parsing and _row rejects it: the same result on every
+    # version. _NUL cannot come from the decoding above, which yields only
+    # U+DC80..U+DCFF for invalid bytes.
+    reader = csv.reader(io.StringIO(text.replace("\x00", _NUL), newline=""))
     try:
         header = next(reader)
     except StopIteration:
@@ -109,6 +118,8 @@ def _read(folder, name):
 def _row(name, cells):
     if cells is None:
         raise _RowError(f"{name}.csv row is not valid CSV")
+    if any(_NUL in v for v in cells):
+        raise _RowError(f"{name}.csv row holds a NUL character")
     if len(cells) != len(COLUMNS[name]):
         raise _RowError(f"{name}.csv row has {len(cells)} fields, expected {len(COLUMNS[name])}")
     if any("\udc80" <= ch <= "\udcff" for v in cells for ch in v):
@@ -163,9 +174,13 @@ def read_csv_folder(folder):
     by_id = {e["cid"]: e for e in entries if counts[e["cid"]] == 1 and e["cid"] is not None}
     duplicated = {cid for cid, n in counts.items() if n > 1}
 
+    unparsed = []  # (file, line) of child rows csv cannot parse
     for name in _NESTED:
         for line, cells in files[name][1]:
-            cid = cells[0] if cells else None
+            if cells is None:
+                unparsed.append((f"{name}.csv", line))
+                continue
+            cid = cells[0]
             if cid in duplicated:
                 continue
             entry = by_id.get(cid)
@@ -189,6 +204,13 @@ def read_csv_folder(folder):
                 entry["claim"]["coverage"] = row
             else:
                 entry["claim"].setdefault(name, []).append(row)
+
+    if unparsed:
+        # Its claim_id is unreadable, so any claim may be missing that row.
+        file, line = unparsed[0]
+        more = f" ({len(unparsed)} rows cannot be parsed)" if len(unparsed) > 1 else ""
+        for e in entries:
+            e["errors"].append(("csv", f"{file} line {line} cannot be parsed, so no claim can be shown complete{more}"))
 
     for e in entries:
         result.records += 1

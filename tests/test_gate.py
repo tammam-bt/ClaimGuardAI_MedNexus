@@ -96,6 +96,20 @@ class AnchorGateTests(GateCase):
         self.assertIn("anchor is missing", printed.getvalue())
         self.assertIn("--restore-anchor", printed.getvalue())
 
+    def test_a_malformed_anchor_exits_2_never_a_traceback(self):
+        # M4: a missing head or a string count crashed the gate with KeyError or TypeError.
+        anchor = Path(chain.default_anchor(self.log))
+        good = json.loads(anchor.read_text(encoding="utf-8"))
+        for name, text in (("truncated", json.dumps(good)[:20]), ("head missing", json.dumps({"count": self.count})),
+                           ("count a string", json.dumps({**good, "count": str(self.count)})),
+                           ("count negative", json.dumps({**good, "count": -1}))):
+            anchor.write_text(text, encoding="utf-8")
+            with self.subTest(name), contextlib.redirect_stdout(io.StringIO()) as printed:
+                code = main(["--results", str(self.results), "--claims", str(self.claims), "--log", str(self.log),
+                             "--directory", str(self.directory)])
+            self.assertEqual(code, 2)
+            self.assertIn("Gate cannot judge: the audit log cannot be trusted: the anchor", printed.getvalue())
+
     def test_prints_the_head_to_record_outside(self):
         with contextlib.redirect_stdout(io.StringIO()) as printed:
             main(["--results", str(self.results), "--claims", str(self.claims), "--log", str(self.log),

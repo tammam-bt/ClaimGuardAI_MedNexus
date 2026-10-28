@@ -177,3 +177,22 @@ Purposeful motion, as set out in `docs/DESIGN_SYSTEM.md` section 5: a fade betwe
 View Transitions, which the plan suggested, were dropped: they draw the new page a frame late, and while one ran every page scrolled sideways by 15 px, a scrollbar's width.
 
 Measured as before, P6 against the P5 build, three rounds back to back: first frame 143–222 ms against 134–203 ms, the dashboard 30–37 ms against 33–36 ms, the Queue 63–100 ms against 84–91 ms, all within this machine's noise; the claim page 25–35 ms against 23–25 ms, a few ms for the sliding finding. Sideways scroll unchanged: 0 px at 768, 1280 and 1440 px; 375 px is P7.
+
+## 11. Progress after P7
+
+Responsive layout and accessibility, as set out in `docs/DESIGN_SYSTEM.md` section 6. Measured as before, P7 against the P6 build, three rounds back to back.
+
+| # | Finding | After P7 (`mak/p7-responsive`) |
+|---|---|---|
+| 1 | Unusable below 768 px | 0 px of sideways scroll on every page at 375, 768, 1280 and 1440 px, against 246 px at 375 px for P6. Below 1100 px the sidebar is a drawer behind a menu button; below 768 px everything is one column and the top bar wraps. The e2e test now checks all four widths, ten pages each, and names what sticks out when one fails. |
+| 7 | Headings jump from h1 to h3 | Card titles are h2, or h3 under a page's own h2. The e2e accessibility check fails any page whose headings skip a level. |
+| 10 | Nothing announces a saved draft | Done in P3 (the claim page's live region); the dashboard saves nothing. |
+| 11 | Tabs without arrow keys | One tab stop; the arrow keys, Home and End move and open; `aria-controls`, a named panel. |
+
+Also: Escape moves the focus back from a finding to the findings list, and, where the claim data sits under the finding, from a cited field back to its chip. The e2e run found one more overflow at 375 px: a callout quoting a long file path (the expected-results file on Evaluation), now allowed to break anywhere.
+
+Render time within the noise: first frame 103–171 ms against 106–165 ms, dashboard 17–38 ms against 18–32 ms, Queue 50–71 ms against 56–140 ms, claim page 23–39 ms against 34–55 ms. Keyboard at 1440 px unchanged (the menu button shows only below 1100 px).
+
+All 14 findings of section 5 are now closed. P8 reruns this script on the final build for the before-and-after comparison.
+
+**Found by CI after P7 was pushed.** On GitHub's Linux runners the Queue still scrolled sideways by 35 px at 375 px: Linux draws with DejaVu Sans, wider than Windows' Segoe UI, and a `<select>` is as wide as its longest option ("R002 · Service and submission chronology"). A wide-font pass (Verdana, or DejaVu Sans where Verdana is missing) reproduced it on Windows and found two more: an unbreakable token in Rule R013's rulebook text, `policy.max_unit_price[service_code],` (10 px), and the largest type specimen on Components (6 px). Fixed: fields and selects never exceed their row, text breaks inside a long word rather than scroll the page, and the type specimens stack below 768 px. The e2e test now runs the ten pages at 375 px with that wide font as well.

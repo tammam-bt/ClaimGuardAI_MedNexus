@@ -321,6 +321,7 @@ html, body { height: 100%; }
 body {
   margin: 0;
   font-family: var(--font-sans);
+  overflow-wrap: break-word;  /* a long ID, path or token breaks rather than scroll the page */
   font-size: var(--text-sm);
   line-height: var(--leading-normal);
   color: var(--color-text);
@@ -423,6 +424,8 @@ code, kbd, pre, samp, .mono { font-family: var(--font-mono); font-size: var(--fo
 .sidebar__user-link:hover { color: var(--color-sidebar-text-strong); text-decoration-thickness: 2px; }
 
 .main { display: flex; flex-direction: column; min-width: 0; }
+.topbar .menu-btn { display: none; }
+.nav-backdrop { position: fixed; inset: 0; z-index: var(--z-modal); background: var(--color-overlay); animation: fade-in var(--duration-base) var(--ease-enter) backwards; }
 .topbar {
   position: sticky; top: 0; z-index: var(--z-sticky);
   height: var(--topbar-h);
@@ -445,8 +448,11 @@ code, kbd, pre, samp, .mono { font-family: var(--font-mono); font-size: var(--fo
 .search input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--color-text); outline: none; }
 .search:focus-within { outline: var(--focus-ring-width) solid var(--color-focus-ring); outline-offset: var(--focus-ring-offset); }
 
-.field { display: flex; flex-direction: column; gap: var(--space-1); font-size: var(--text-xs); font-weight: var(--weight-semibold); color: var(--color-text-muted); }
+.field { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; max-width: 100%; font-size: var(--text-xs); font-weight: var(--weight-semibold); color: var(--color-text-muted); }
+/* A select is as wide as its longest option, which depends on the system's
+   font: it may never be wider than its row. */
 .input, .select, .textarea {
+  max-width: 100%;
   min-height: 40px; padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-border-strong); border-radius: var(--radius-md);
   background: var(--color-bg); color: var(--color-text); font-size: var(--text-sm); font-weight: var(--weight-regular);
@@ -655,7 +661,7 @@ button.stage:hover { box-shadow: var(--shadow-md); }
 .fill-clear { background: var(--color-chart-clear); } .fill-primary { background: var(--color-primary); } .fill-info { background: var(--color-info); }
 
 /* ----------------------------------------------------------- callouts */
-.callout { display: flex; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); border: 1px solid; font-size: var(--text-sm); }
+.callout { display: flex; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); border: 1px solid; font-size: var(--text-sm); overflow-wrap: anywhere; }
 .callout .icon { margin-top: 1px; }
 .callout__title { font-weight: var(--weight-semibold); }
 
@@ -814,6 +820,30 @@ button.timeline__body:hover .small { text-decoration: underline; }
   .checks { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .grid--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .search { width: 220px; }
+  /* the sidebar becomes a drawer, opened by the menu button (main.js) */
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .sidebar {
+    position: fixed; top: 0; bottom: 0; left: 0; z-index: var(--z-modal);
+    width: var(--sidebar-w); height: auto; overflow-y: auto;
+    transform: translateX(-100%); transition: transform var(--duration-base) var(--ease-standard);
+  }
+  .app.is-nav-open .sidebar { transform: none; box-shadow: var(--shadow-lg); }
+  .topbar .menu-btn { display: inline-flex; }
+}
+@media (max-width: 768px) /* --bp-md */ {
+  /* one column; the top bar wraps, search on its own row */
+  .topbar { height: auto; flex-wrap: wrap; gap: var(--space-2) var(--space-3); padding: var(--space-3) var(--space-4); }
+  .topbar__title p { display: none; }
+  .topbar__title h1 { font-size: var(--text-lg); overflow-wrap: anywhere; }
+  .role-switch__long { display: none; }
+  .search { width: 100%; }
+  .topbar .search { order: 3; }
+  .content { padding: var(--space-4) var(--space-4) var(--space-8); gap: var(--space-4); }
+  .grid--4, .grid--3, .grid--2 { grid-template-columns: minmax(0, 1fr); }
+  .lifecycle, .checks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .card__head { flex-wrap: wrap; }
+  .type-row { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
+  .card__meta { flex-basis: 100%; order: 2; }
 }
 
 /* ---------------------------------------------------------- claim detail */

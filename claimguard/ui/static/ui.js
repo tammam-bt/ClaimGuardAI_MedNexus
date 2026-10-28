@@ -168,11 +168,13 @@ function linkButton(opts) {
 }
 
 // ------------------------------------------------------------------- cards
+// A card's title is an h2 under the page's h1, or an h3 (level: 3) on a
+// page that has its own h2 (a claim, a rule), so headings never skip a level.
 function card(opts) {
   const o = opts || {};
   return h("section", { class: "card", "aria-label": o.title || null },
     o.title ? h("div", { class: "card__head" },
-      h("h3", { class: "card__title", text: o.title }),
+      h(o.level === 3 ? "h3" : "h2", { class: "card__title", text: o.title }),
       o.meta ? h("span", { class: "card__meta" }, o.meta) : null,
       o.actions || null) : null,
     h("div", { class: `card__body${o.flush ? " card__body--flush" : ""}` }, o.body));
@@ -355,15 +357,28 @@ function searchField(opts) {
 
 // ------------------------------------------------------------------ tabs
 // tabs: [{ key, label, count, render }]; the active tab is kept per name.
+// One tab stop: the arrow keys, Home and End move between the tabs and
+// open the one they reach; the panel is named by its tab.
 function tabs(name, list, initial) {
-  const panel = h("div", { role: "tabpanel" });
+  const id = (t) => `tab-${name}-${t.key}`;
+  const panel = h("div", { role: "tabpanel", id: `tabpanel-${name}`, tabindex: "0" });
   let active = list.some((t) => t.key === initial) ? initial : list[0].key;
-  const bar = h("div", { class: "tabs", role: "tablist" });
+  const bar = h("div", { class: "tabs", role: "tablist", onKeydown: (e) => {
+    const i = list.findIndex((t) => t.key === active);
+    const to = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: list.length - 1 }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    active = list[(to + list.length) % list.length].key;
+    draw();
+    document.getElementById(id(list.find((t) => t.key === active))).focus();
+  } });
   function draw() {
     bar.replaceChildren(...list.map((t) => h("button", {
-      type: "button", class: "tab", role: "tab", "aria-selected": String(t.key === active),
+      type: "button", class: "tab", role: "tab", id: id(t), "aria-selected": String(t.key === active),
+      "aria-controls": `tabpanel-${name}`, tabindex: t.key === active ? "0" : "-1",
       onClick: () => { active = t.key; draw(); },
     }, t.label, t.count !== undefined ? h("span", { class: "tab__count", text: Core.number(t.count) }) : null)));
+    panel.setAttribute("aria-labelledby", id(list.find((t) => t.key === active)));
     panel.replaceChildren(list.find((t) => t.key === active).render());
   }
   draw();

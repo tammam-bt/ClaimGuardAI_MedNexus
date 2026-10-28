@@ -18,6 +18,29 @@ const Shell = (function () {
   let currentPath = null;
   let firstRender = true;
 
+  // Below --bp-lg the sidebar is a drawer. The menu button opens it over
+  // the page, which is inert meanwhile; Escape, the backdrop or a link
+  // closes it and focus goes back to the button. Closed, the drawer is
+  // inert too, so the keyboard never lands on a link it cannot see.
+  const narrow = window.matchMedia("(max-width: 1100px)");
+  const menuButton = button({ label: "Menu", icon: "menu", iconOnly: true, variant: "ghost", onClick: () => setDrawer(true) });
+  menuButton.classList.add("menu-btn");
+  menuButton.setAttribute("aria-controls", "sidebar");
+  const backdrop = h("div", { class: "nav-backdrop", hidden: true, onClick: () => setDrawer(false) });
+  let sidebarEl = null, mainEl = null, drawerOpen = false;
+
+  function setDrawer(open, returnFocus = true) {
+    const was = drawerOpen;
+    drawerOpen = open && narrow.matches;
+    document.getElementById("app").classList.toggle("is-nav-open", drawerOpen);
+    menuButton.setAttribute("aria-expanded", String(drawerOpen));
+    backdrop.hidden = !drawerOpen;
+    sidebarEl.inert = narrow.matches && !drawerOpen;
+    mainEl.inert = drawerOpen;
+    if (drawerOpen) (sidebarEl.querySelector(".nav__item[aria-current=page]") || sidebarEl.querySelector(".nav__item")).focus();
+    else if (was && returnFocus) menuButton.focus();
+  }
+
   function openCount() {
     const events = decisions();
     return CLAIMS.filter((c) => Core.outcome(c, events) !== "ready").length;
@@ -49,7 +72,7 @@ const Shell = (function () {
   }
 
   function sidebar() {
-    return h("aside", { class: "sidebar" },
+    return h("aside", { class: "sidebar", id: "sidebar", "aria-label": "Navigation" },
       h("div", { class: "brand" }, icon("logo"),
         h("div", {}, h("div", { class: "brand__name", text: "ClaimGuard AI" }),
           h("div", { class: "brand__tag", text: "Claim pre-validation" }))),
@@ -73,7 +96,8 @@ const Shell = (function () {
 
   function roleSwitch() {
     // A demonstration switch, not access control: the page has no login.
-    return h("label", { class: "row small muted" }, "Demo: view as",
+    // On a narrow screen it reads "Demo" beside the select (named "Role").
+    return h("label", { class: "row small muted role-switch" }, h("span", {}, "Demo", h("span", { class: "role-switch__long", text: ": view as" })),
       h("select", { class: "select", "aria-label": "Role", onChange: (e) => { State.role = e.target.value; State.save(); render(); } },
         [["reviewer", "Reviewer"], ["admin", "Admin"]].map(([v, l]) => h("option", { value: v, selected: State.role === v ? true : null, text: l }))));
   }
@@ -95,11 +119,16 @@ const Shell = (function () {
     const skip = h("a", { class: "skip-link", href: "#content", text: "Skip to content",
       onClick: (e) => { e.preventDefault(); content.focus(); } });
     document.body.insertBefore(skip, app);
-    app.replaceChildren(sidebar(),
-      h("div", { class: "main" },
-        h("header", { class: "topbar" }, h("div", { class: "topbar__title" }, title, subtitle), topbarSearch(), roleSwitch()),
-        content));
+    document.body.insertBefore(backdrop, app);
+    sidebarEl = sidebar();
+    mainEl = h("div", { class: "main" },
+      h("header", { class: "topbar" }, menuButton, h("div", { class: "topbar__title" }, title, subtitle), topbarSearch(), roleSwitch()),
+      content);
+    app.replaceChildren(sidebarEl, mainEl);
     drawNav();
+    setDrawer(false);
+    narrow.addEventListener("change", () => setDrawer(false, false));
+    document.addEventListener("keydown", (e) => { if (drawerOpen && e.key === "Escape") { e.preventDefault(); setDrawer(false); } });
     State.onChange(refreshUser);
     window.addEventListener("hashchange", render);
   }
@@ -110,6 +139,7 @@ const Shell = (function () {
   // the same page is drawn again (a role switch), never with reduced motion.
   function render() {
     closePanel();
+    setDrawer(false, false);  // a link in the drawer was followed
     drawNav();
     const route = parseRoute();
     const path = `${route.key}/${route.id || ""}`;

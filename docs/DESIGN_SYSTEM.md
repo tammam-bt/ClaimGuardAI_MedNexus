@@ -82,7 +82,22 @@ Rules: transform and opacity only; fills are `backwards`, so a finished animatio
 
 The plan asked for View Transitions where the browser has them. They were tried and dropped: a View Transition draws the new page a frame later, so a script reading the page right after a navigation (the e2e tests) saw the old one, and while it ran every page scrolled sideways by a scrollbar's width. The fade gives the same effect with the page drawn at once.
 
-## 6. Checked on which systems
+## 6. Layout and keyboard (P7)
+
+| Width | Layout |
+|---|---|
+| Above 1360 px | Sidebar, and the claim workspace in three panes side by side |
+| 1101 to 1360 px | The claim data moves under the finding |
+| 768 to 1100 px | The sidebar is a drawer behind a menu button; the workspace is one column; stat cards two a row |
+| 768 px and below | One column; the top bar wraps, search on its own row; the role switch reads "Demo"; card sources under their title |
+
+- **The drawer** opens over the page, which is inert meanwhile, with the focus on the current page's link. Escape, the backdrop or a link closes it, and the focus goes back to the menu button. Closed, it is inert too, so Tab never lands on a link it cannot see.
+- **Focus between the claim's panes:** Enter on a finding moves into it, Escape comes back to the list. Where the claim data sits under the finding, "show in claim" takes the focus to the field and Escape brings it back to the chip.
+- **Headings never skip a level:** card titles are h2 under the page's h1, or h3 (`card({ level: 3 })`) on a page with its own h2, a claim or a rule. The e2e test checks every page.
+- **Fonts differ by system:** a select is as wide as its longest option, and a long ID or token can be wider than a phone. Fields and selects never exceed their row, and text breaks inside a long word rather than scroll the page; the e2e test checks 375 px with a wide font too.
+- **`tabs(name, list)`** is one tab stop: the arrow keys, Home and End move and open; each tab controls the panel, which is named by the active tab.
+
+## 7. Checked on which systems
 
 System fonts change the face, not the scale. Checked so far:
 

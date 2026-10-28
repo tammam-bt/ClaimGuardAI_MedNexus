@@ -196,3 +196,32 @@ Render time within the noise: first frame 103–171 ms against 106–165 ms, das
 All 14 findings of section 5 are now closed. P8 reruns this script on the final build for the before-and-after comparison.
 
 **Found by CI after P7 was pushed.** On GitHub's Linux runners the Queue still scrolled sideways by 35 px at 375 px: Linux draws with DejaVu Sans, wider than Windows' Segoe UI, and a `<select>` is as wide as its longest option ("R002 · Service and submission chronology"). A wide-font pass (Verdana, or DejaVu Sans where Verdana is missing) reproduced it on Windows and found two more: an unbreakable token in Rule R013's rulebook text, `policy.max_unit_price[service_code],` (10 px), and the largest type specimen on Components (6 px). Fixed: fields and selects never exceed their row, text breaks inside a long word rather than scroll the page, and the type specimens stack below 768 px. The e2e test now runs the ten pages at 375 px with that wide font as well.
+
+## 12. P8: before and after
+
+The P1 build (`mak/p1-ui-baseline`, `3183823`) against the final Track B build (`mak/p7-responsive`, `9827838`; the Linux font fix `251d45d` that followed changes widths only and was checked for sideways scroll, not timed again), both built from the same run of the development split, measured back to back on the same machine: three rounds of nine runs each, alternating. The "after" screenshots are in `outputs/p8_after/` (40, the same pages and widths as `outputs/p1_baseline/`; `outputs/` is not committed).
+
+Against the criteria of section 6:
+
+| Criterion | Before (P1) | After | Holds |
+|---|---|---|---|
+| First frame with content, no worse | 147.3 ms (101–313), 27 runs | 148.4 ms (98–291), 27 runs | Yes, within noise. The page is 70 KB larger (5.36 MB) |
+| Queue, next frame, no worse than 137 ms | 187–192 ms this day | 55–70 ms | Yes: 2,465 elements, was 7,148 |
+| Claims, next frame, no worse than 133 ms | 235–346 ms this day | 50–57 ms | Yes: 2,408 elements, was 10,244 |
+| 0 px sideways scroll at 375, 768, 1280, 1440 px | 244–268 px at 375 px (section 3) | 0 at all four, every page | Yes |
+| First decision on a claim within the first stops of the content | stop 41 | stop 20 | Yes |
+| Name field before Save | last stop (54 of 54) | beside Save, in the decision panel | Yes |
+| No list costs one stop per row | Queue and Claims 120+ stops | Queue 32, Claims 29, Rule R013 27 (was 83) | Yes |
+| Every stop shows a focus ring, none hidden | yes | yes | Yes |
+
+Other pages move within the noise (dashboard 18–22 ms against 19–24, audit 10–14 against 13–17), except two:
+
+- **Rule R013**, 53–62 ms against 37–78 ms: its claim list now carries a fingerprint per row (2,532 elements, was 1,963) but draws 50 rows, not 56.
+- **Components** has 1,620 elements against 974: it shows every new component.
+
+Two notes on reading the table:
+
+- P1's own build here showed 422 px of sideways scroll at 375 px and 43 px at 768 px, more than section 3 recorded. That was this comparison's doing: it was built with an absolute path to the expected results, which Evaluation quotes in a callout that P1 could not wrap. Section 3's 244–268 px is P1 as measured on its day; the callout now wraps (P7).
+- Stops before the content are 10 on a reviewer's own pages, 13 once "More" is open (it stays open after a visit to one of its pages); P1 had 11 to 12.
+
+All 14 findings of section 5 are closed (sections 7 to 11).

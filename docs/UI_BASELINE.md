@@ -154,3 +154,18 @@ Also in P4:
 - **Next open claim.** When the last finding of a claim is decided, the finding pane says so and the focus moves to "Next open claim: CG-…", the next claim of that list with a finding left to decide (from the top again after the end). The e2e test checks it.
 
 First frame is unchanged within the noise: 122–221 ms for P4 against 139–193 ms for P3 in the same rounds; the claim page 21–23 ms against 22–38 ms. Still open: 1 (375 px, P7); 7 and 11 (heading levels, tab keys); 14 (P5).
+
+## 9. Progress after P5
+
+The dashboard is now a command center, with the run's eight-stage life cycle still as its spine. Measured as in section 8, P5 against the P4 build, three rounds back to back.
+
+- **Every number opens its list.** The four stat cards open the Review Queue, the ready claims, the flagged claims and the rejected records (`#/dashboard?focus=rejected` scrolls to them and moves the focus). Each bar of "Where the review stands" opens the claims at that stage, each route bar the claims on that route, and each row of "Rules most often failing or unassessed" the claims that rule failed or could not assess (it opened the rule before).
+- **Every card names its source:** the run manifest, the results (with "routed by the fixed rules" where the route is computed), the audit log, or this browser. The life cycle uses all four.
+- **A card that answered no question is gone.** "Results", the status of all 6,000 checks, is replaced by "Where the review stands": the claims at each stage, from To review to Ready for submission. "Records received" moves into the life cycle (stage 1); its stat card is now "Rejected at ingestion", out of the records received.
+- **Empty states point to the next action.** "No draft in this browser" links to the Review Queue; "No rule failed" to every claim; a page built without an audit log says to ask an administrator for one built with it (the page never shows a command).
+- **New card "Your drafts"** (source: this browser): the decisions saved here and not yet in the audit log, with the download, in place of the banner.
+- Finding 14 closed: Evaluation's "Click a rule to open it" now reads "Each rule opens its page: logic, policy values and the claims it flagged".
+
+Nothing was added that the data cannot hold: no turnaround, trend or workload per reviewer.
+
+Render time: the dashboard's next frame is 34–44 ms against 25–33 ms for P4 in the same rounds, from the extra bars and cards. First frame (the dashboard, cold) 121–151 ms against 107–230 ms, within this machine's noise today. Sideways scroll is 0 px at 768, 1280 and 1440 px; 375 px is still P7. Still open: 1 (375 px, P7); 7 and 11 (heading levels, tab keys).

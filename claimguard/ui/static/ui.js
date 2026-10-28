@@ -172,8 +172,9 @@ function card(opts) {
     h("div", { class: `card__body${o.flush ? " card__body--flush" : ""}` }, o.body));
 }
 
-// Stat card: icon, label, value, and where the number comes from. Always the
-// same anatomy; no sparkline, because one run has no history to draw.
+// Stat card: icon, label, value, a caption, and the file the number comes
+// from (source). Always the same anatomy; no sparkline, because one run has
+// no history to draw.
 function statCard(opts) {
   const o = opts || {};
   const inner = [
@@ -181,7 +182,8 @@ function statCard(opts) {
     h("span", { class: "stat__body" },
       h("span", { class: "stat__label", text: o.label }),
       h("span", { class: "stat__value", text: o.value }),
-      o.caption ? h("span", { class: "stat__caption", text: o.caption }) : null),
+      o.caption ? h("span", { class: "stat__caption", text: o.caption }) : null,
+      o.source ? h("span", { class: "stat__source", text: `Source: ${o.source}` }) : null),
   ];
   return o.href ? h("a", { class: "card stat", href: o.href }, inner) : h("div", { class: "card stat" }, inner);
 }

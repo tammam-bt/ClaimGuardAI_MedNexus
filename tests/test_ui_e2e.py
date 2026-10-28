@@ -155,6 +155,26 @@ class EndToEndTests(unittest.TestCase):
             self.assertNotIn(gone, d["page"])
         self.assertIn("Chain valid", d["page"])
         self.assertIn("Open audit log", d["page"])
+
+    def test_the_dashboard_is_a_command_center(self):
+        d = self.out["dashboard"]
+        # Every card names the file its numbers come from.
+        self.assertEqual(d["unsourced"], [])
+        self.assertEqual(d["statSources"], ["Source: results, routed by the fixed rules",
+                                            "Source: results, audit log and drafts in this browser",
+                                            "Source: run manifest", "Source: run manifest"])
+        # Every number opens the list it counts.
+        self.assertEqual(d["statLinks"], ["#/queue", "#/claims?stage=ready", "#/claims?flag=flagged", "#/dashboard?focus=rejected"])
+        self.assertEqual(d["focusRejected"], "sec-rejected")
+        self.assertIn("#/claims?stage=to_review", d["barLinks"])
+        self.assertIn("#/claims?route=ESCALATE", d["barLinks"])
+        self.assertTrue(d["ruleLinks"] and all(h.startswith("#/claims?rule=R") for h in d["ruleLinks"]))
+        # Where the review stands replaces the count of every check, which answered no question.
+        self.assertIn("Where the review stands", d["titles"])
+        self.assertNotIn("Results", d["titles"])
+        # An empty card points to the next action.
+        self.assertIn("No draft in this browser", d["drafts"])
+        self.assertIn("Open the Review Queue", d["drafts"])
         self.assertNotIn("Engine", d["sidebar"])
         self.assertNotIn("prompt", d["sidebar"])
 
@@ -207,7 +227,7 @@ class EndToEndTests(unittest.TestCase):
         self.assertIn("No disagreement", e["page"])
         self.assertIn("Rule's explanation: 495", e["page"])
         self.assertNotIn("AI explanation: 495", e["page"])
-        for gone in ("python -m", "(doc", "Doc 07", "Prompt", "null", "Not impl."):
+        for gone in ("python -m", "(doc", "Doc 07", "Prompt", "null", "Not impl.", "Click"):
             self.assertNotIn(gone, e["page"])
         self.assertEqual(self.out["hostile"]["mismatchRows"], 1)
 

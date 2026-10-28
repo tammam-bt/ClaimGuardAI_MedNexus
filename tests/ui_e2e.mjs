@@ -212,6 +212,22 @@ try {
   await goTo("#/dashboard");
   out.dashboard = { lifecycle: await text(".lifecycle"), stats: await text(".grid--4"), rejected: await text("#sec-rejected"),
     page: await text(".content"), sidebar: await text(".sidebar") };
+  // A command center: every card names its source, every number opens its list.
+  Object.assign(out.dashboard, await evaluate(`(() => {
+    const cards = [...document.querySelectorAll('.content .card')].filter(c => c.querySelector('.card__title'));
+    return {
+      titles: cards.map(c => c.querySelector('.card__title').textContent),
+      unsourced: cards.filter(c => !(c.querySelector('.card__meta') || {}).textContent?.includes('Source:')).map(c => c.querySelector('.card__title').textContent),
+      statSources: [...document.querySelectorAll('.grid--4 .stat')].map(s => (s.querySelector('.stat__source') || {}).textContent || null),
+      statLinks: [...document.querySelectorAll('.grid--4 .stat')].map(s => s.getAttribute('href')),
+      barLinks: [...document.querySelectorAll('.content a.bar')].map(a => a.getAttribute('href')),
+      ruleLinks: [...document.querySelectorAll('.content .row-link')].map(a => a.getAttribute('href')),
+      drafts: [...document.querySelectorAll('.content .card')].find(c => c.textContent.startsWith('Your drafts'))?.textContent || null,
+    };
+  })()`));
+  await goTo("#/dashboard?focus=rejected");
+  await sleep(100);
+  out.dashboard.focusRejected = await evaluate("document.activeElement.id");
 
   // ---- audit: the role decides which events show
   await goTo("#/audit");

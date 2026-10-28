@@ -510,6 +510,7 @@ a.btn--ghost:hover { color: var(--color-text-muted); }
 .stat__label { color: var(--color-text-muted); font-size: var(--text-sm); font-weight: var(--weight-medium); }
 .stat__value { font-family: var(--font-mono); font-size: var(--text-3xl); font-weight: var(--weight-semibold); line-height: var(--leading-tight); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
 .stat__caption { color: var(--color-text-subtle); font-size: var(--text-xs); }
+.stat__source { margin-top: var(--space-1); color: var(--color-text-subtle); font-size: var(--text-xs); }
 a.stat { color: inherit; text-decoration: none; }
 
 /* -------------------------------------------------------------- page head */

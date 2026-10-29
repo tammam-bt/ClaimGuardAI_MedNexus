@@ -1,26 +1,26 @@
 # ClaimGuard AI · readiness note (version 3)
 
-All three tracks of master plan revision 4 are built: the must-do fixes M0 to M9, the review page redesign P1 to P8, and the local backend B0 to B5. Every item of the readiness bar holds, each with a test or a command that fails if it breaks, on Python 3.10 and 3.12, locally. Track C has not been through GitHub CI yet: it is not pushed. **And only M0, M1 and M7 are on `main`**: section 1 says why, and how one pull request brings in the rest.
+All three tracks of master plan revision 4 are built: the must-do fixes M0 to M9, the review page redesign P1 to P8, and the local backend B0 to B5. Every item of the readiness bar holds, each with a test or a command that fails if it breaks, on Python 3.10 and 3.12, locally and on GitHub CI. **Tracks A and B are on `main`; Track C is pull request #44, not merged yet** (section 1).
 
 This note separates what is implemented and tested, what is only documented, and what nobody outside the team has verified. "Accuracy 1.0" means our statuses agree with the pack's reference labels on the three public splits. It does not mean the rules are clinically or contractually right, and nobody has scored the hidden split.
 
 | | |
 |---|---|
-| Team · date | MedNexus · 28 Oct 2026 |
-| Commit | branch `mak/track-c-backend`, on `mak/p8-verification` at `423e18c` |
+| Team · date | MedNexus · 28 Oct 2026, updated 29 Oct 2026 |
+| Commit | branch `mak/track-c-backend` (`592f1bb`, `9512e00`), on P8 at `423e18c`; pull request #44 into `main` |
 | Pack | ClaimGuard AI starter pack 1.0.0, `validate_pack.py` PASS |
 | Plan | Master plan revision 4: Tracks A, B and C done. B0 was decided "go" by the user; the mentor's confirmation is pending (DEC-015) |
 | Changed since version 2 | B0 (`docs/THREAT_MODEL.md`, DEC-015), B1 to B3 (`python -m claimguard.ui.serve`: the page, saving decisions, the correction builder), B4 (optional sign-in, DEC-016), B5 (tests, security review, this note) |
 
 ## 1. What is on `main`
 
-The stacked pull requests #31 to #41 all show as merged, but only #31 reached `main`. Each later one targeted the branch below it, and those branches were kept after merging, so GitHub never moved the next pull request onto `main`: #32 to #41 merged into each other's branches.
-
 | On `main` | Not on `main` |
 |---|---|
-| M0 (CSV fails closed), M1 + M7 (CI) | M2 + M3, M4, M5, M8, M9, P1 to P8, Track C |
+| Track A (M0 to M9) and Track B (P1 to P8): everything up to readiness note version 2 | Track C (B0 to B5), with this note: pull request #44 |
 
-The top of the stack holds everything below it. One pull request from the top branch into `main` brings all of it in; deleting each branch once its pull request merges keeps the next one on `main`. Track C sits on top of P8, so the same pull request can carry it, or P8's can go first.
+Only #31 (M0, M1 + M7) went straight to `main`. The stacked pull requests #32 to #42 each merged into the branch below them, not into `main`: those branches were kept after merging, so GitHub never moved the next pull request onto `main`. Pull request #43, from P8 at the top of the stack, brought all of them in on 29 Oct 2026 (`66cc546`), and GitHub CI passed on that merge on 3.10 and 3.12. No stacked branch from M0 to P8 now adds anything to `main`.
+
+Track C sits on P8. Pull request #44 merges into `main` without a conflict, and GitHub CI passed on both of its commits. Until it merges, `main` has readiness note version 2 and none of the server.
 
 ## 2. Readiness bar
 
@@ -28,7 +28,7 @@ The top of the stack holds everything below it. One pull request from the top br
 
 | Item | Holds | Evidence |
 |---|---|---|
-| `validate_pack.py` passes; CI green on 3.10 and 3.12 with e2e running | Yes | Section 3 (local); CI on `251d45d` for Track B. Track C is not pushed yet |
+| `validate_pack.py` passes; CI green on 3.10 and 3.12 with e2e running | Yes | Section 3 (local); GitHub CI on `251d45d` (Track B), `66cc546` (`main` after #43), `592f1bb` and `9512e00` (Track C) |
 | Accuracy 1.0 on all three public splits | Yes | Section 3: 0 FP, 0 FN, 0 not implemented |
 | No accepted claim is missing a row; unreadable rows fail closed; NUL the same on every version | Yes | `test_csv`, `test_ingest_fuzz` (M0) |
 | No tracked `.env*` file at any depth but `.env.example` | Yes | CI step and `test_rbac_and_secrets` (M1) |
@@ -57,9 +57,9 @@ The top of the stack holds everything below it. One pull request from the top br
 | `tamper_demo` results unchanged | Yes | Section 3 |
 | This note says what sign-in does and does not prove | Yes | Section 5 |
 
-## 3. Regression run, 28 Oct 2026
+## 3. Regression run, 29 Oct 2026
 
-Every step of `.github/workflows/ci.yml`, plus the audit commands, run on Windows from a snapshot of the branch: `HEAD` plus the changed files, extracted with `core.autocrlf=false` so the pack's checksums see the same bytes as CI on Linux, one per Python version.
+Every step of `.github/workflows/ci.yml`, plus the audit commands, run on Windows from a snapshot of the branch: `HEAD` plus the changed files, extracted with `core.autocrlf=false` so the pack's checksums see the same bytes as CI on Linux, one per Python version. GitHub CI then ran the same workflow on Linux for both Track C commits, `592f1bb` and `9512e00`: green on 3.10 and 3.12, with the e2e tests required.
 
 | Check | 3.10.21 | 3.12.14 |
 |---|---|---|
@@ -94,7 +94,7 @@ Found while testing: Windows lets a second program bind a port already in use wh
 - The page on a real phone or tablet, with a screen reader, on Apple devices, or in browsers other than Chrome: as in version 2. The served page was tested in headless Chrome only.
 - The server under load: it serves one reviewer's session; nothing measured how many it can serve.
 
-**Independently verified: nothing yet.** GitHub CI has run Tracks A and B, but only our own tests; Track C has not run there. No mentor or other team has reviewed the chain, the gate, the page or the server.
+**Independently verified: nothing yet.** GitHub CI has run all three tracks, but only our own tests. No mentor or other team has reviewed the chain, the gate, the page or the server.
 
 ## 5. Known limits
 
@@ -110,6 +110,6 @@ Found while testing: Windows lets a second program bind a port already in use wh
 ## 6. Next
 
 1. Ask the mentor to confirm B0 (DEC-015) and B4 (DEC-016), and question 2 on four-eyes approval.
-2. Push `mak/track-c-backend` and let CI run it on Linux, then one pull request from the top of the stack into `main` (section 1).
+2. Merge pull request #44 into `main` (section 1), then delete the merged `mak/` branches, so no later pull request lands on a branch that never reaches `main`.
 3. Check the page on an Apple device (Safari) and, if possible, with a screen reader.
 4. A demo script, with the server (section 4b), is in `docs/DEMO_WALKTHROUGH.md`.

@@ -80,9 +80,9 @@ const Dashboard = (function () {
     const claims = new Set(State.drafts.map((d) => d.claim_id)).size;
     return card({ title: "Your drafts", meta: `Source: ${FROM.browser}`, body: n
       ? h("div", { class: "stack" },
-        h("p", { class: "small", text: `${Core.plural(n, "decision")} on ${Core.plural(claims, "claim")}, not in the audit log until an administrator appends them.` }),
-        h("div", { class: "row" }, button({ label: `Download decisions (${n})`, icon: "download", onClick: downloadDecisions })))
-      : emptyState({ icon: "user", title: "No draft in this browser", text: "Decisions you save on a claim wait here until they are downloaded.",
+        h("p", { class: "small", text: `${Core.plural(n, "decision")} on ${Core.plural(claims, "claim")}. ${draftsWait()}` }),
+        draftActions())
+      : emptyState({ icon: "user", title: "No draft in this browser", text: `Decisions you save on a claim wait here until they are ${Server.live ? "saved to the audit log" : "downloaded"}.`,
         action: linkButton({ href: href("queue"), label: "Open the Review Queue", icon: "arrow-right" }) }) });
   }
 

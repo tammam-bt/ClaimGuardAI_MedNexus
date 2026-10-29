@@ -550,6 +550,113 @@ const ClaimDetail = (function () {
         checkGrid(v.results)))) });
   }
 
+  // The correction builder (B3): pick a field, enter its new value, give a
+  // reason. It builds JSON Patch "replace" operations on the current version.
+  // With the local server it rechecks them as a new version
+  // (claimguard.review.correct); without, it downloads the patch file that
+  // command reads. Identifiers are never offered: a correction may not edit
+  // them (claimguard.review.correction).
+  const IDENTIFIER = /^\/(claim_id|schema_version|lines\/(0|[1-9][0-9]*)\/line_id)$/;
+  function leaves(v, path, out) {
+    if (v !== null && typeof v === "object") {
+      for (const [k, child] of Object.entries(v)) leaves(child, `${path}/${k.replace(/~/g, "~0").replace(/\//g, "~1")}`, out);
+    } else if (!IDENTIFIER.test(path)) out.push({ path, value: v });
+    return out;
+  }
+  // The new value keeps the old one's type: a number stays a number.
+  function typed(text, before) {
+    const t = text.trim();
+    if (typeof before === "number") return t !== "" && Number.isFinite(Number(t)) ? { value: Number(t) } : { error: "Enter a number." };
+    if (typeof before === "boolean") return t === "true" || t === "false" ? { value: t === "true" } : { error: "Enter true or false." };
+    return { value: text };
+  }
+  const shown = (v) => (v === null || v === undefined ? "no value" : String(v).length > 40 ? `${String(v).slice(0, 39)}…` : String(v));
+
+  function correctionCard(entry) {
+    if (!can("mark_corrected_for_recheck")) return null;
+    const cur = Core.current(entry);
+    const id = entry.route.claim_id;
+    const fields = leaves(cur.claim, "", []);
+    if (!fields.length) return null;
+    const changes = [];
+    const recheck = Server.live && Server.status.corrections;
+    const field = h("select", { id: "fix-field", class: "select" },
+      fields.map((f) => h("option", { value: f.path, text: `${Core.fieldLabel(f.path, cur.claim)} (now ${shown(f.value)})` })));
+    const valueInput = h("input", { id: "fix-value", class: "input", autocomplete: "off" });
+    const reason = h("textarea", { id: "fix-reason", class: "textarea", rows: "2", placeholder: "Why? e.g. Re-read from the source record." });
+    const listHolder = h("div");
+    const problem = h("div");
+    const progress = h("span", { class: "muted small", role: "status" });
+    const say = (title) => fill(problem, title ? callout({ tone: "fail", icon: "alert-triangle", role: "alert", title }) : null);
+
+    function addChange() {
+      const f = fields.find((x) => x.path === field.value);
+      const v = typed(valueInput.value, f.value);
+      if (v.error) { say(v.error); valueInput.focus(); return; }
+      if (v.value === f.value) { say("That is the value it already has."); valueInput.focus(); return; }
+      const at = changes.findIndex((c) => c.path === f.path);
+      const op = { op: "replace", path: f.path, value: v.value };
+      if (at >= 0) changes[at] = op; else changes.push(op);
+      valueInput.value = "";
+      say(null);
+      draw();
+      valueInput.focus();
+    }
+    function draw() {
+      fill(listHolder, changes.length ? h("ul", { class: "stack stack--tight problems", "aria-label": "Changes to make" }, changes.map((c, i) => {
+        const before = fields.find((x) => x.path === c.path).value;
+        return h("li", { class: "row" }, h("span", { class: "small", text: `${Core.fieldLabel(c.path, cur.claim)}: ${shown(before)} → ${shown(c.value)}` }),
+          button({ label: "Remove", variant: "ghost", icon: "x", onClick: () => { changes.splice(i, 1); draw(); } }));
+      })) : h("p", { class: "muted small", text: "No change yet." }));
+      submit.disabled = !changes.length;
+    }
+    const ready = () => {
+      if (!changes.length) return "Add a change first.";
+      if (!reason.value.trim()) return "Write the reason first.";
+      if (!State.reviewer.trim()) return "Enter your name in Settings first.";
+      return null;
+    };
+    const submit = button({ label: recheck ? "Recheck as a new version" : "Download the correction", variant: "primary",
+      icon: recheck ? "refresh" : "download", onClick: async () => {
+        const missing = ready();
+        if (missing) { say(missing); return; }
+        say(null);
+        if (!recheck) {
+          download(`correction_${id}_v${cur.version + 1}.json`, JSON.stringify(changes, null, 2) + "\n");
+          progress.textContent = "Downloaded. An administrator applies it, with your name and reason, as a new version.";
+          return;
+        }
+        if (!Server.canSave) { say("Sign in (Settings) to correct a claim."); return; }
+        submit.disabled = true;
+        progress.textContent = "Rechecking…";
+        const r = await Server.call("POST", "/api/corrections", { claim_id: id, parent_hash: cur.input_hash, changes,
+          actor: State.reviewer, reason: reason.value });
+        if (r.ok) {
+          const moved = (r.data.status_changes || []).map(statusChange).join(", ");
+          const errors = (r.data.rule_errors || []).map((e) => e.rule_id);
+          Server.reloadWith({ title: `${id} v${r.data.version} recorded and rechecked`,
+            text: `${moved ? `Status changes: ${moved}.` : "No status changed."}` +
+              `${errors.length ? ` A rule failed during the recheck (${errors.join(", ")}): its result is Unable to assess.` : ""} ${gateLine(r.data.gate)}` });
+          return;
+        }
+        submit.disabled = false;
+        progress.textContent = "";
+        say(String(r.data.error || "Not corrected."));
+      } });
+    draw();
+    return card({ level: 3, title: "Correct this claim", meta: recheck ? "Rechecked by the local server as a new version" : "Builds a correction file",
+      body: h("div", { class: "stack" },
+        h("p", { class: "muted small", text: `A correction never edits v${cur.version}: it becomes v${cur.version + 1}, and all 15 checks run again on it.` }),
+        h("div", { class: "row" },
+          h("label", { class: "field", for: "fix-field" }, "Field", field),
+          h("label", { class: "field", for: "fix-value" }, "New value", valueInput),
+          button({ label: "Add change", onClick: addChange })),
+        listHolder,
+        h("label", { class: "field", for: "fix-reason" }, "Reason (required)", reason),
+        problem,
+        h("div", { class: "row" }, submit, progress)) });
+  }
+
   // This claim's audit events your role may see, then decisions not yet
   // sent, as one timeline: a draft never looks like a logged event.
   function historyCard(entry) {
@@ -638,6 +745,7 @@ const ClaimDetail = (function () {
           (counts.NOT_IMPLEMENTED ? ` · ${counts.NOT_IMPLEMENTED} not implemented` : ""),
         body: checkGrid(cur.results, { onPick: (r) => (finds.some((f) => f.result.rule_id === r.rule_id) ? pick(r.rule_id) : resultPanel(cur, r)) }) })),
       versionsCard(entry),
+      correctionCard(entry),
       historyHolder,
       section("sec-received", card({ level: 3, title: "Claim as received", body: h("details", { class: "disclosure" },
         h("summary", { text: "Show the JSON envelope (untrusted text shown as data)" }),

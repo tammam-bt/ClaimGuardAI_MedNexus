@@ -8,7 +8,8 @@
 Every decision is checked before anything is written, and one bad decision
 writes nothing:
 
-  - it has exactly the review_decision fields claimguard.audit.chain records;
+  - it has exactly the review_decision fields claimguard.audit.chain records,
+    each one text, as schemas/review_event.schema.json types them;
   - it passes claimguard.guards.rbac.authorize_event: the review-event schema's
     keys, a known actor whose role may take the action, and a reason;
   - created_at is an ISO date-time;
@@ -86,6 +87,9 @@ def check(events, directory, claims, results, corrections=None):
         if not isinstance(e, dict) or set(e) != FIELDS or e.get("event") != "review_decision":
             problems.append(f"{where}: not a review_decision event with exactly the fields {sorted(FIELDS)}")
             continue
+        if not all(isinstance(e[k], str) for k in FIELDS):  # the schema's types; a list would crash the checks
+            problems.append(f"{where}: every field must be text")
+            continue
         try:
             authorize_event(directory, {k: e[k] for k in SCHEMA_KEYS})
         except PermissionDenied as err:
@@ -110,25 +114,42 @@ def check(events, directory, claims, results, corrections=None):
     return problems
 
 
-def append_decisions(decisions_path, log, *, claims_path, results_path, directory, anchor=None, corrections=None,
-                     command=COMMAND):
-    """Check, then append. Returns a summary; raises ValueError listing every
-    problem, having written nothing. directory is {actor: role}: required,
-    since without one there is no role to check. command is the one the
-    append_performed event names."""
-    events = load_jsonl(decisions_path)
+class DecisionsRefused(ValueError):
+    """Decisions refused, nothing appended; .problems lists every reason."""
+
+    def __init__(self, problems):
+        super().__init__("no decision appended:\n  " + "\n  ".join(problems))
+        self.problems = list(problems)
+
+
+def append_events(events, log, *, claims_path, results_path, directory, input_sha256, anchor=None,
+                  corrections=None, command=COMMAND):
+    """Check, then append a list of review_decision events. Returns a summary;
+    raises DecisionsRefused listing every problem, having written nothing.
+    input_sha256 is the SHA-256 of the bytes the events came from, which the
+    append_performed event records with command."""
     claims = claims_by_id(claims_path)
     results = load_jsonl(results_path)
     problems = check(events, directory, claims, results, corrections)
     if problems:
-        raise ValueError("no decision appended:\n  " + "\n  ".join(problems))
+        raise DecisionsRefused(problems)
     anchor = anchor or chain.default_anchor(log)
     recorded = [row["event"] for row in load_jsonl(log)] if Path(log).exists() else []
     new = [e for e in events if e not in recorded]
-    head, count = (chain.append(log, new, anchor, performed=(command, chain.file_sha256(decisions_path)))
+    head, count = (chain.append(log, new, anchor, performed=(command, input_sha256))
                    if new else chain.verify(log, anchor))
     return {"read": len(events), "appended": len(new), "already_in_chain": len(events) - len(new),
             "events_in_chain": count, "head": head}
+
+
+def append_decisions(decisions_path, log, *, claims_path, results_path, directory, anchor=None, corrections=None,
+                     command=COMMAND):
+    """append_events for the file downloaded from the interface. directory is
+    {actor: role}: required, since without one there is no role to check.
+    command is the one the append_performed event names."""
+    return append_events(load_jsonl(decisions_path), log, claims_path=claims_path, results_path=results_path,
+                         directory=directory, input_sha256=chain.file_sha256(decisions_path), anchor=anchor,
+                         corrections=corrections, command=command)
 
 
 def main(argv=None):

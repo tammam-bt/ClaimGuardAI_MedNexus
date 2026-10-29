@@ -38,7 +38,7 @@ const Core = (function () {
     confirm_issue: { label: "Confirm issue", icon: "flag",
       help: "The finding is right; the claim needs a correction." },
     dismiss_with_reason: { label: "Dismiss with reason", icon: "ban",
-      help: "The finding does not hold for this claim. The reason is kept in the audit log." },
+      help: "The finding does not hold for this claim. Your reason goes with the decision." },
     request_information: { label: "Request information", icon: "message-question",
       help: "More source information is needed before deciding." },
     mark_corrected_for_recheck: { label: "Corrected, recheck", icon: "refresh",
@@ -108,6 +108,7 @@ const Core = (function () {
     model_failure: { label: "Model failure (fallback)", icon: "alert-triangle", tone: "unknown" },
     review_decision: { label: "Review decision", icon: "user", tone: "pass" },
     version_created: { label: "New claim version", icon: "refresh", tone: "info" },
+    append_performed: { label: "Append performed", icon: "stamp", tone: "neutral" },
   };
 
   const STAGES = [

@@ -3,29 +3,76 @@
 // page) and the start-up. Pages are drawn into .content only.
 
 const Shell = (function () {
+  // A reviewer's nav is shorter: their own pages, Review Queue first, and
+  // the run's pages one step away under "More". A convenience, not access
+  // control: every page stays open to both roles at its address.
+  const REVIEWER_NAV = ["queue", "claims", "rules", "settings"];
   const navLinks = new Map();
+  const nav = h("nav", { class: "nav", "aria-label": "Main" });
+  let navRole = null;
   const title = h("h1");
   const subtitle = h("p");
   const content = h("main", { class: "content", id: "content", tabindex: "-1" });
   const userBlock = h("div", { class: "sidebar__user" });
   let current = null;
+  let currentPath = null;
   let firstRender = true;
+
+  // Below --bp-lg the sidebar is a drawer. The menu button opens it over
+  // the page, which is inert meanwhile; Escape, the backdrop or a link
+  // closes it and focus goes back to the button. Closed, the drawer is
+  // inert too, so the keyboard never lands on a link it cannot see.
+  const narrow = window.matchMedia("(max-width: 1100px)");
+  const menuButton = button({ label: "Menu", icon: "menu", iconOnly: true, variant: "ghost", onClick: () => setDrawer(true) });
+  menuButton.classList.add("menu-btn");
+  menuButton.setAttribute("aria-controls", "sidebar");
+  const backdrop = h("div", { class: "nav-backdrop", hidden: true, onClick: () => setDrawer(false) });
+  let sidebarEl = null, mainEl = null, drawerOpen = false;
+
+  function setDrawer(open, returnFocus = true) {
+    const was = drawerOpen;
+    drawerOpen = open && narrow.matches;
+    document.getElementById("app").classList.toggle("is-nav-open", drawerOpen);
+    menuButton.setAttribute("aria-expanded", String(drawerOpen));
+    backdrop.hidden = !drawerOpen;
+    sidebarEl.inert = narrow.matches && !drawerOpen;
+    mainEl.inert = drawerOpen;
+    if (drawerOpen) (sidebarEl.querySelector(".nav__item[aria-current=page]") || sidebarEl.querySelector(".nav__item")).focus();
+    else if (was && returnFocus) menuButton.focus();
+  }
 
   function openCount() {
     const events = decisions();
     return CLAIMS.filter((c) => Core.outcome(c, events) !== "ready").length;
   }
 
-  function sidebar() {
-    const nav = h("nav", { class: "nav", "aria-label": "Main" });
-    for (const page of PAGES.filter((p) => p.nav !== false)) {
-      const count = page.key === "queue" ? h("span", { class: "nav__count", "aria-label": "open claims" }) : null;
-      const link = h("a", { class: "nav__item", href: href(page.key) },
-        icon(page.icon), h("span", { class: "nav__label", text: page.label }), count);
-      navLinks.set(page.key, { link, count });
-      nav.appendChild(link);
+  function navLink(page) {
+    const count = page.key === "queue" ? h("span", { class: "nav__count", "aria-label": "open claims" }) : null;
+    const link = h("a", { class: "nav__item", href: href(page.key) },
+      icon(page.icon), h("span", { class: "nav__label", text: page.label }), count);
+    navLinks.set(page.key, { link, count });
+    return link;
+  }
+  // Drawn again only when the role changes.
+  function drawNav() {
+    if (navRole === State.role) return;
+    navRole = State.role;
+    navLinks.clear();
+    const pages = PAGES.filter((p) => p.nav !== false);
+    if (State.role === "admin") {
+      fill(nav, pages.map(navLink));
+    } else {
+      const more = pages.filter((p) => !REVIEWER_NAV.includes(p.key));
+      fill(nav, REVIEWER_NAV.map((k) => pages.find((p) => p.key === k)).filter(Boolean).map(navLink),
+        more.length ? h("details", { class: "nav__more" },
+          h("summary", { class: "nav__item" }, icon("chevron-down"), h("span", { class: "nav__label", text: "More" })),
+          h("div", { class: "nav__group" }, more.map(navLink))) : null);
     }
-    return h("aside", { class: "sidebar" },
+    refreshUser();
+  }
+
+  function sidebar() {
+    return h("aside", { class: "sidebar", id: "sidebar", "aria-label": "Navigation" },
       h("div", { class: "brand" }, icon("logo"),
         h("div", {}, h("div", { class: "brand__name", text: "ClaimGuard AI" }),
           h("div", { class: "brand__tag", text: "Claim pre-validation" }))),
@@ -48,7 +95,9 @@ const Shell = (function () {
   }
 
   function roleSwitch() {
-    return h("label", { class: "row small muted" }, "View as",
+    // A demonstration switch, not access control: the page has no login.
+    // On a narrow screen it reads "Demo" beside the select (named "Role").
+    return h("label", { class: "row small muted role-switch" }, h("span", {}, "Demo", h("span", { class: "role-switch__long", text: ": view as" })),
       h("select", { class: "select", "aria-label": "Role", onChange: (e) => { State.role = e.target.value; State.save(); render(); } },
         [["reviewer", "Reviewer"], ["admin", "Admin"]].map(([v, l]) => h("option", { value: v, selected: State.role === v ? true : null, text: l }))));
   }
@@ -70,22 +119,45 @@ const Shell = (function () {
     const skip = h("a", { class: "skip-link", href: "#content", text: "Skip to content",
       onClick: (e) => { e.preventDefault(); content.focus(); } });
     document.body.insertBefore(skip, app);
-    app.replaceChildren(sidebar(),
-      h("div", { class: "main" },
-        h("header", { class: "topbar" }, h("div", { class: "topbar__title" }, title, subtitle), topbarSearch(), roleSwitch()),
-        content));
-    refreshUser();
+    document.body.insertBefore(backdrop, app);
+    sidebarEl = sidebar();
+    mainEl = h("div", { class: "main" },
+      h("header", { class: "topbar" }, menuButton, h("div", { class: "topbar__title" }, title, subtitle), topbarSearch(), roleSwitch()),
+      content);
+    app.replaceChildren(sidebarEl, mainEl);
+    drawNav();
+    setDrawer(false);
+    narrow.addEventListener("change", () => setDrawer(false, false));
+    document.addEventListener("keydown", (e) => { if (drawerOpen && e.key === "Escape") { e.preventDefault(); setDrawer(false); } });
     State.onChange(refreshUser);
     window.addEventListener("hashchange", render);
   }
 
+  // A new page fades in (.page-enter). It is drawn at once, never a frame
+  // later: a View Transition would defer the swap, and while it ran the page
+  // scrolled sideways by a scrollbar's width. Not on first load, not when
+  // the same page is drawn again (a role switch), never with reduced motion.
   function render() {
     closePanel();
+    setDrawer(false, false);  // a link in the drawer was followed
+    drawNav();
     const route = parseRoute();
-    const page = PAGES.find((p) => p.key === route.key) || PAGES.find((p) => p.key === "dashboard");
+    const path = `${route.key}/${route.id || ""}`;
+    const fade = !firstRender && path !== currentPath && !reducedMotion();
+    currentPath = path;
+    draw(route, fade);
+  }
+
+  function draw(route, fade) {
+    const page = PAGES.find((p) => p.key === route.key) || PAGES.find((p) => p.key === homePage());
     if (current !== page.key) window.scrollTo(0, 0);
     current = page.key;
-    for (const [key, { link }] of navLinks) link.setAttribute("aria-current", key === page.key ? "page" : "false");
+    for (const [key, { link }] of navLinks) {
+      link.setAttribute("aria-current", key === page.key ? "page" : "false");
+      // The page on screen is never hidden in a closed "More".
+      const more = link.closest(".nav__more");
+      if (more && key === page.key) more.open = true;
+    }
     title.textContent = page.label;
     subtitle.textContent = page.subtitle;
     document.title = `${page.label} | ClaimGuard AI`;
@@ -96,6 +168,7 @@ const Shell = (function () {
       console.error(err);
       body = emptyState({ icon: "alert-triangle", title: "This page could not be drawn", text: String(err && err.message || err) });
     }
+    if (fade) body.classList.add("page-enter");
     content.replaceChildren(body);
     // After a navigation (not on first load), move focus to the new content
     // so keyboard and screen-reader users land on it.
@@ -106,5 +179,7 @@ const Shell = (function () {
   return { build, render, refreshUser };
 })();
 
+applyTheme();  // before the first draw, so the page never flashes the other theme
+State.onChange(applyTheme);
 Shell.build();
 Shell.render();

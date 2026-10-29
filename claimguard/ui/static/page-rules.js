@@ -34,10 +34,10 @@ const RulesPage = (function () {
   function policyCard(ruleId) {
     const fields = POLICY_FIELDS[ruleId];
     if (!fields) {
-      return card({ title: "Policy values used", body: h("p", { class: "muted small", text: "This rule reads no policy value." }) });
+      return card({ level: 3, title: "Policy values used", body: h("p", { class: "muted small", text: "This rule reads no policy value." }) });
     }
     const policies = Object.values(DATA.policies);
-    return card({ title: "Policy values used", meta: "rules/policies.json", flush: true, body: table({
+    return card({ level: 3, title: "Policy values used", meta: "rules/policies.json", flush: true, body: table({
       caption: "Policy values this rule reads", rows: fields,
       columns: [
         { key: "field", label: "Field", render: (k) => h("span", { class: "mono", text: k }) },
@@ -48,10 +48,10 @@ const RulesPage = (function () {
   function performanceCard(ruleId) {
     const m = metricsFor(ruleId);
     if (!m) {
-      return card({ title: "Performance", body: emptyState({ icon: "bar-chart", title: "Not scored",
+      return card({ level: 3, title: "Performance", body: emptyState({ icon: "bar-chart", title: "Not scored",
         text: "Expected results weren't loaded, so this run isn't scored." }) });
     }
-    return card({ title: "Performance", meta: "Official scorer", body: h("div", { class: "stack" },
+    return card({ level: 3, title: "Performance", meta: "Official scorer", body: h("div", { class: "stack" },
       kv([
         ["Status accuracy", Core.percent(m.status_accuracy)],
         ["Issue precision", Core.percent(m.issue_precision)],
@@ -65,7 +65,7 @@ const RulesPage = (function () {
 
   function matrixCard(ruleId) {
     if (!DATA.evaluation) return null;
-    return card({ title: "Expected against predicted", meta: `${ruleId} on ${Core.plural(CLAIMS.length, "claim")}`,
+    return card({ level: 3, title: "Expected against predicted", meta: `${ruleId} on ${Core.plural(CLAIMS.length, "claim")}`,
       body: confusionMatrix(DATA.evaluation.confusion_by_rule[ruleId], `${ruleId}: expected against predicted`) });
   }
 
@@ -84,7 +84,7 @@ const RulesPage = (function () {
           caption: "A failure sends the claim to review" }),
       ]),
       card({ title: "All rules", meta: "Every rule is deterministic: no model and no probability", flush: true, body: table({
-        caption: "The 15 rules", rows, onRowClick: (x) => go("rules", x.rule.rule_id),
+        caption: "The 15 rules", rows, rowHref: (x) => href("rules", x.rule.rule_id),
         columns: [
           { key: "id", label: "Rule", sort: (x) => x.rule.rule_id, render: (x) => h("span", {},
             h("span", { class: "mono", text: x.rule.rule_id }), ` ${x.rule.title}`) },
@@ -103,7 +103,7 @@ const RulesPage = (function () {
   function detail(ruleId, route) {
     const rule = RULE_BY_ID.get(ruleId);
     if (!rule) {
-      return card({ body: emptyState({ icon: "search", title: `No rule ${ruleId}`, text: "The rulebook has R001 to R015.",
+      return card({ level: 3, body: emptyState({ icon: "search", title: `No rule ${ruleId}`, text: "The rulebook has R001 to R015.",
         action: linkButton({ href: href("rules"), label: "All rules", icon: "chevron-left" }) }) });
     }
     const counts = statusCountsFor(ruleId);
@@ -122,15 +122,15 @@ const RulesPage = (function () {
           rule.implemented === false ? statusBadge("NOT_IMPLEMENTED") : null)),
       h("div", { class: "grid grid--main-side" },
         h("div", { class: "stack" },
-          card({ title: "Rule logic", meta: "Quoted from the rulebook", body: h("div", { class: "stack" },
+          card({ level: 3, title: "Rule logic", meta: "Quoted from the rulebook", body: h("div", { class: "stack" },
             h("p", { class: "logic", text: rule.logic }),
             h("div", { class: "finding__section" }, h("span", { class: "label", text: "Corrective action" }), h("p", { text: rule.corrective_action }))) }),
           policyCard(ruleId)),
         h("div", { class: "stack" },
-          card({ title: "This run", meta: `${Core.number(CLAIMS.length)} claims`, body: bars(statusBars(counts)) }),
+          card({ level: 3, title: "This run", meta: `${Core.number(CLAIMS.length)} claims`, body: bars(statusBars(counts)) }),
           performanceCard(ruleId))),
       matrixCard(ruleId),
-      card({ title: "Claims with a finding on this rule", meta: Core.plural(concerned.length, "claim"), flush: !!concerned.length,
+      card({ level: 3, title: "Claims with a finding on this rule", meta: Core.plural(concerned.length, "claim"), flush: !!concerned.length,
         body: concerned.length
           ? ClaimViews.list({ pageKey: "rules", pageId: ruleId, base: concerned, params: route.params, hide: ["rule", "show"], bare: true })
           : emptyState({ icon: "check-check", title: "No finding in this run", text: "Every claim passed this check or it did not apply." }) }));

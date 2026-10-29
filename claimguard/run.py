@@ -11,7 +11,9 @@
   explain  with --explain, the AI explainer on FAIL and UNABLE_TO_ASSESS
            results, watchdog-guarded, written to <output>.explanations.jsonl,
            never into the scored results.
-  record   the run manifest, <output>.manifest.json.
+  record   the run manifest, <output>.manifest.json; with --audit-log, the
+           run's events in one batch, ending with append_performed (the OS
+           user who ran it and the input's SHA-256).
 
 With --complete, every claim the scorer will read gets its 15 results even if
 ingestion rejected it: all UNABLE_TO_ASSESS, citing only /claim_id, flagged
@@ -25,7 +27,9 @@ no pair is duplicated. The completed IDs are listed in the manifest.
 --complete and --limit exclude each other: a limited run is never complete.
 
 Exit code 0: every record ingested and every rule ran. 2: something was
-rejected or a rule failed; the manifest lists each one.
+rejected or a rule failed; the manifest lists each one. Also 2 when
+--audit-log refuses the run's events (a broken chain, or another command
+writing it): nothing is appended.
 """
 import argparse
 import hashlib
@@ -175,7 +179,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "rule_errors": len(engine.errors), "injection_flags": len(injection_flags),
             "manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
         })
-        chain.append(a.audit_log, [{**e, "run_id": run_id} for e in events], anchor)
+        try:
+            chain.append(a.audit_log, [{**e, "run_id": run_id} for e in events], anchor,
+                         performed=("claimguard.run", ingested.source_sha256))
+        except chain.AuditError as e:
+            print(f"Audit log refused this run's events, so none were recorded: {e}")
+            if isinstance(e, chain.MissingAnchor):
+                print(chain.RESTORE_HINT)
+            return 2
 
     if completed:
         print(f"{len(completed)} rejected claims given 15 UNABLE_TO_ASSESS results (--complete).")

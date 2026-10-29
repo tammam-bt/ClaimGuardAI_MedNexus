@@ -76,7 +76,17 @@ class EndToEndTests(unittest.TestCase):
             self.assertFalse(page["crashed"], key)
             self.assertTrue(page["title"], key)
         self.assertEqual(self.out["pages"]["claims"]["current"], "Claims")
-        self.assertEqual(self.out["sidebarSame"], 7)
+
+    def test_navigation_follows_the_role(self):
+        nav = self.out["sidebarSame"]
+        # A reviewer's own pages first, the run's pages one step away under "More".
+        self.assertEqual(nav["reviewer"]["main"], ["Review Queue", "Claims", "Rules", "Settings"])
+        self.assertEqual(nav["reviewer"]["more"], ["Dashboard", "Audit Logs", "Evaluation"])
+        self.assertTrue(nav["moreOpenOnItsPage"])
+        self.assertEqual(nav["admin"], ["Dashboard", "Review Queue", "Claims", "Audit Logs", "Rules", "Evaluation", "Settings"])
+        self.assertEqual(nav["adminMore"], 0)
+        # An address without a page opens a reviewer's home.
+        self.assertEqual(self.out["home"], {"title": "Review Queue", "current": "Review Queue"})
 
     def test_accessibility_on_every_page(self):
         for key, page in self.out["pages"].items():
@@ -84,9 +94,45 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(self.out["keyboard"]["firstStop"], "Skip to content")
         self.assertEqual(self.out["keyboard"]["afterSkip"], "content")
 
-    def test_no_page_scrolls_sideways_at_1280px(self):
-        for key, overflow in self.out["narrow"].items():
-            self.assertLessEqual(overflow, 0, key)
+    def test_no_page_scrolls_sideways_at_any_width(self):
+        self.assertEqual(sorted(self.out["narrow"], key=int), ["375", "768", "1280", "1440"])
+        # Every page that scrolls, at once, with what sticks out.
+        wide = [f"{key} at {width} px by {overflow} px: {pages.get(key + ' (wide)')}"
+                for width, pages in self.out["narrow"].items() for key, overflow in pages.items()
+                if not key.endswith("(wide)") and overflow > 0]
+        self.assertEqual(wide, [])
+
+    def test_no_page_scrolls_sideways_with_a_wider_font(self):
+        # CI on Linux draws with DejaVu Sans, wider than Segoe UI: the filters
+        # once scrolled the Queue sideways there and nowhere else.
+        pages = self.out["narrowWideFont"]
+        wide = [f"{key} by {overflow} px: {pages.get(key + ' (wide)')}" for key, overflow in pages.items()
+                if not key.endswith("(wide)") and overflow > 0]
+        self.assertEqual(wide, [])
+
+    def test_below_1100px_the_sidebar_is_a_drawer(self):
+        d = self.out["drawer"]
+        self.assertTrue(d["buttonShown"])
+        # Closed: out of reach of the keyboard, and the page is not inert.
+        self.assertEqual((d["closed"]["expanded"], d["closed"]["sidebarInert"], d["closed"]["mainInert"]), ("false", True, False))
+        # Open: the page behind is inert and the focus is on the current page's link.
+        self.assertEqual((d["open"]["expanded"], d["open"]["sidebarInert"], d["open"]["mainInert"]), ("true", False, True))
+        self.assertTrue(d["open"]["focused"].startswith("Review Queue"))
+        # Escape closes it and gives the focus back to the menu button.
+        self.assertEqual((d["afterEscape"]["expanded"], d["afterEscape"]["focused"]), ("false", "menu"))
+        # A link closes it.
+        self.assertEqual((d["afterLink"]["hash"][:9], d["afterLink"]["expanded"], d["afterLink"]["mainInert"]), ("#/claims", "false", False))
+        self.assertEqual(d["wide"], {"inert": False, "buttonShown": False})
+
+    def test_focus_moves_between_the_panes(self):
+        self.assertEqual(self.out["kb"]["escape"], {"into": "finding-R003", "back": "opt-R003"})
+        t = self.out["stackedThread"]
+        self.assertTrue(t["focusedPath"] and t["focusedPath"].startswith("/coverage"), t)
+        self.assertTrue(t["back"])
+
+    def test_tabs_move_with_the_arrow_keys(self):
+        self.assertEqual(self.out["tabs"], {"focused": "tab-components-b", "selected": "true", "stops": 1,
+                                            "panel": "tab-components-b"})
 
     def test_offline(self):
         self.assertEqual(self.out["network"], [])
@@ -106,6 +152,28 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(o["reloadedFresh"], "navigate")  # a real page load, not a hash change
         self.assertNotIn("null", o["headBefore"])
 
+    def test_a_claim_is_decided_by_keyboard_alone(self):
+        kb = self.out["kb"]
+        # Tab reaches the findings list as one stop, not one per finding.
+        self.assertLessEqual(kb["tabsToList"], 12)
+        self.assertEqual(kb["firstOption"], "R003")
+        self.assertEqual(kb["afterJ"], {"selected": "R004", "focused": "opt-R004"})
+        self.assertEqual(kb["afterK"], "R003")
+        first = kb["first"]
+        self.assertEqual(first["opened"], "finding-R003")       # Enter opens the finding
+        self.assertLessEqual(first["toAction"], 12)            # the actions are a few stops away
+        self.assertEqual(first["confirm"], "Yes, dismiss")      # Dismiss asks once more
+        # Saved: the next undecided finding opens by itself.
+        self.assertEqual(first["nowSelected"], "R004")
+        self.assertEqual(first["nowFocused"], "finding-R004")
+        self.assertEqual(kb["second"]["confirm"], "Yes, dismiss")
+        self.assertNotEqual(kb["replace"]["confirm"], "Yes, dismiss")  # only Dismiss asks
+
+    def test_a_draft_the_browser_will_not_store_is_not_lost(self):
+        s = self.out["storageFailure"]
+        self.assertIn("would not store the draft", s["alert"])
+        self.assertTrue(s["kept"])
+
     def test_dashboard(self):
         d = self.out["dashboard"]
         for part in ("400 records", "400 accepted", "6,000 checks", "4 flagged for injection", "495 explained · 4 withheld",
@@ -123,6 +191,26 @@ class EndToEndTests(unittest.TestCase):
             self.assertNotIn(gone, d["page"])
         self.assertIn("Chain valid", d["page"])
         self.assertIn("Open audit log", d["page"])
+
+    def test_the_dashboard_is_a_command_center(self):
+        d = self.out["dashboard"]
+        # Every card names the file its numbers come from.
+        self.assertEqual(d["unsourced"], [])
+        self.assertEqual(d["statSources"], ["Source: results, routed by the fixed rules",
+                                            "Source: results, audit log and drafts in this browser",
+                                            "Source: run manifest", "Source: run manifest"])
+        # Every number opens the list it counts.
+        self.assertEqual(d["statLinks"], ["#/queue", "#/claims?stage=ready", "#/claims?flag=flagged", "#/dashboard?focus=rejected"])
+        self.assertEqual(d["focusRejected"], "sec-rejected")
+        self.assertIn("#/claims?stage=to_review", d["barLinks"])
+        self.assertIn("#/claims?route=ESCALATE", d["barLinks"])
+        self.assertTrue(d["ruleLinks"] and all(h.startswith("#/claims?rule=R") for h in d["ruleLinks"]))
+        # Where the review stands replaces the count of every check, which answered no question.
+        self.assertIn("Where the review stands", d["titles"])
+        self.assertNotIn("Results", d["titles"])
+        # An empty card points to the next action.
+        self.assertIn("No draft in this browser", d["drafts"])
+        self.assertIn("Open the Review Queue", d["drafts"])
         self.assertNotIn("Engine", d["sidebar"])
         self.assertNotIn("prompt", d["sidebar"])
 
@@ -142,12 +230,13 @@ class EndToEndTests(unittest.TestCase):
     def test_audit_page_follows_the_role(self):
         a = self.out["audit"]
         self.assertIn("Valid", a["reviewer"]["page"])
-        self.assertIn("6 run events hidden for your role", a["reviewer"]["page"])
+        self.assertIn("7 run events hidden for your role", a["reviewer"]["page"])
+        self.assertIn("Reviewer names are self-declared; the log records who appended them.", a["reviewer"]["page"])
         self.assertEqual(a["reviewer"]["count"], "0 of 0 events")
-        for gone in ("python -m", "Adding decisions", "view_run_events", "(doc"):
+        for gone in ("python -m", "Adding decisions", "view_run_events", "(doc", "OS user"):
             self.assertNotIn(gone, a["reviewer"]["page"])
-        self.assertEqual(a["admin"]["count"], "6 of 6 events")
-        self.assertEqual(a["admin"]["types"][0], "Run finished")
+        self.assertEqual(a["admin"]["count"], "7 of 7 events")
+        self.assertEqual(a["admin"]["types"][:2], ["Append performed", "Run finished"])  # latest first
         self.assertEqual(a["admin"]["types"][-1], "Run started")
 
     def test_settings(self):
@@ -162,7 +251,8 @@ class EndToEndTests(unittest.TestCase):
             self.assertNotIn(gone, s["page"])
         rows = {r[0]: r[1:] for r in s["rbacRows"]}  # plain action names, no code identifier beside them
         self.assertEqual(rows["Dismiss with reason"], ["Allowed", "Allowed"])
-        self.assertEqual(rows["See run events (runs, rejections, flags, model failures)"], ["Not allowed", "Allowed"])
+        self.assertEqual(rows["See run events (runs, rejections, flags, model failures, who ran each append)"],
+                         ["Not allowed", "Allowed"])
         self.assertTrue(s["confirmShown"])
         self.assertEqual(s["keptDrafts"], 2)
 
@@ -173,19 +263,63 @@ class EndToEndTests(unittest.TestCase):
         self.assertIn("No disagreement", e["page"])
         self.assertIn("Rule's explanation: 495", e["page"])
         self.assertNotIn("AI explanation: 495", e["page"])
-        for gone in ("python -m", "(doc", "Doc 07", "Prompt", "null", "Not impl."):
+        for gone in ("python -m", "(doc", "Doc 07", "Prompt", "null", "Not impl.", "Click"):
             self.assertNotIn(gone, e["page"])
         self.assertEqual(self.out["hostile"]["mismatchRows"], 1)
+
+    def test_motion_is_short_and_off_with_reduced_motion(self):
+        m = self.out["motion"]
+        names = {a["name"] for a in m["dashboard"]["anims"]}
+        self.assertTrue(m["dashboard"]["pageEnter"])          # the new page fades in
+        self.assertIn("rise", names)                           # the dashboard enters in steps
+        self.assertTrue(all(a["end"] <= 300 for a in m["dashboard"]["anims"]), m["dashboard"]["anims"])
+        self.assertTrue(m["claim"]["pageEnter"])
+        self.assertIn("draw", m["thread"])                     # the evidence thread draws itself
+        self.assertEqual(self.out["afterOne"]["saved"], "R003")  # a saved draft pops in the list
+        # Reduced motion: no fade, and no motion that lasts. Colour fades are
+        # not motion; and a link inside a closed "More" keeps the style it had
+        # when the test switched the setting, until it shows (Chrome).
+        self.assertFalse(m["reduced"]["pageEnter"])
+        moving = [a for a in m["reduced"]["anims"] if not a["name"].startswith("transition ")
+                  or a["name"] in ("transition transform", "transition opacity")]
+        self.assertTrue(moving)
+        self.assertTrue(all(a["end"] <= 1 for a in moving), moving)
 
     def test_review_queue(self):
         o = self.out
         self.assertEqual(o["queueBefore"]["count"], "264 of 264 claims")
         self.assertTrue(all("Escalate" in r for r in o["queueBefore"]["firstRoutes"]))
         self.assertTrue(o["queueRowOpens"].startswith("#/claims/CG-"))
+        # Back from a claim goes to the list it came from, filters included.
+        self.assertEqual(o["backLink"], {"text": "Review Queue", "href": "#/queue?show=open"})
         # Both findings dismissed: the claim is ready and leaves the open queue.
         self.assertEqual(o["queueAfter"]["count"], "263 of 264 claims")
-        self.assertEqual(o["queueAfter"]["drafts"], "2")
+        self.assertIn("2 drafts in this browser", o["queueAfter"]["drafts"])
         self.assertEqual(o["queueAll"], "264 of 264 claims")
+
+    def test_queue_rows_are_light_and_carry_the_fingerprint(self):
+        rows = self.out["queueRows"]
+        self.assertEqual(rows["drawn"], 50)  # of 264: the rest a button away
+        self.assertEqual(rows["fingerprints"], 50)
+        self.assertIn("Showing 50 of 264", rows["foot"])
+        self.assertTrue(rows["next"].startswith("CG-"))  # the next claim to decide, first
+        self.assertIn("Open claim", rows["next"])
+
+    def test_a_table_is_one_tab_stop(self):
+        rows, kb = self.out["queueRows"], self.out["queueKb"]
+        self.assertEqual(rows["stops"], 1)
+        self.assertLessEqual(kb["tabsToTable"], 25)
+        self.assertTrue(kb["first"].startswith("CG-"))
+        self.assertEqual((kb["afterJJ"], kb["afterK"], kb["afterEnd"]), (2, 1, 49))
+        self.assertEqual(kb["afterTab"], "Show 50 more")  # Tab leaves the table in one press
+        self.assertEqual(kb["afterMore"], {"drawn": 100, "focused": 50})
+        self.assertTrue(kb["enterOpens"].startswith("#/claims/CG-"))
+
+    def test_the_next_open_claim_follows_the_last_decision(self):
+        kb = self.out["kb"]
+        self.assertEqual(kb["second"]["nowFocused"], "next-claim")
+        self.assertTrue(self.out["afterTwo"]["next"].startswith("Next open claim: CG-"))
+        self.assertNotIn("CG-785C09BD9CC8", self.out["afterTwo"]["next"])
 
     def test_claim_page_speaks_a_reviewers_language(self):
         page = self.out["claimPage"]
@@ -225,6 +359,9 @@ class EndToEndTests(unittest.TestCase):
     def test_filters_reach_the_url(self):
         self.assertIn("route=REVIEW", self.out["filtered"]["hash"])
         self.assertTrue(self.out["filtered"]["count"].startswith("63 of"))
+        self.assertIn("sort=total", self.out["filtered"]["sortedHash"])
+        self.assertIn("route=REVIEW", self.out["filtered"]["sortedHash"])
+        self.assertEqual(self.out["filtered"]["linkSort"], "descending")
 
     def test_hostile_text_never_runs(self):
         h = self.out["hostile"]

@@ -15,11 +15,13 @@ folder; the real files are only read. One line per scenario:
   log deleted              detected by the anchor
   history rewritten        detected by the anchor: a fresh, internally valid
                            chain of as many events, the last one altered
+  anchor deleted, history  detected: a log with events and no anchor fails
+  rewritten
   log and anchor both      NOT detected: whoever controls both files can
-  rewritten                rewrite both. Tamper-evident, not immutable; the
-                           fix is an anchor held outside the system (WORM
-                           storage, an external timestamp), see
-                           docs/PRIVACY_SECURITY.md
+  rewritten                rewrite both. Tamper-evident, not immutable
+  both rewritten, head     detected: event N no longer has the head recorded
+  held outside             outside this machine (--expect-count,
+                           --expect-head); see docs/PRIVACY_SECURITY.md
 
 Exit code 0 when every scenario behaves exactly as stated, 1 otherwise.
 """
@@ -69,6 +71,13 @@ def _rewrite_log(log: Path, anchor: Path) -> None:
     chain.append(log, events)  # a fresh, internally valid chain; the recorded anchor stays
 
 
+def _rewrite_drop_anchor(log: Path, anchor: Path) -> None:
+    events = _altered_history(log)
+    log.unlink()
+    anchor.unlink()
+    chain.append(log, events)  # no anchor written: the missing anchor gives it away
+
+
 def _rewrite_both(log: Path, anchor: Path) -> None:
     events = _altered_history(log)
     log.unlink()
@@ -83,15 +92,20 @@ SCENARIOS: List[Tuple[str, Callable[[Path, Path], None], bool]] = [
     ("last event removed", _drop_last, True),
     ("log deleted", _delete, True),
     ("history rewritten", _rewrite_log, True),
+    ("anchor deleted, history rewritten", _rewrite_drop_anchor, True),
     ("log and anchor both rewritten", _rewrite_both, False),
+    ("both rewritten, head held outside", _rewrite_both, True),
 ]
+# Verified against the real log's count and head, as if recorded outside this
+# machine before the tampering (--expect-count, --expect-head).
+HELD_OUTSIDE = {"both rewritten, head held outside"}
 
 
 def run(log, anchor=None) -> List[dict]:
     """One row per scenario: name, outcome text, whether it behaved as stated."""
     log = Path(log)
     anchor = Path(anchor or chain.default_anchor(log))
-    count = chain.verify(log, str(anchor))[1]  # the real log must verify first
+    head, count = chain.verify(log, str(anchor))  # the real log must verify first
     if count < 2:
         raise chain.AuditError("the demonstration needs a verified log with at least 2 events")
     rows = []
@@ -102,7 +116,7 @@ def run(log, anchor=None) -> List[dict]:
             shutil.copy(anchor, copy_anchor)
             tamper(copy, copy_anchor)
             try:
-                n = chain.verify(copy, str(copy_anchor))[1]
+                n = chain.verify(copy, str(copy_anchor), (count, head) if name in HELD_OUTSIDE else None)[1]
                 outcome, detected = f"verifies ({n} events)", False
             except chain.AuditError as e:
                 outcome, detected = f"detected: {e}", True
@@ -126,7 +140,7 @@ def main(argv=None) -> int:
     for r in rows:
         print(f"{r['scenario']:<{width}}  {r['outcome']}")
     print("Tamper-evident, not immutable: rewriting both the log and its anchor goes undetected "
-          "without an anchor held outside the system.")
+          "unless the head is also recorded outside this machine (--expect-count, --expect-head).")
     return 0 if all(r["as_stated"] for r in rows) else 1
 
 

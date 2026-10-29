@@ -1,6 +1,6 @@
 "use strict";
-// Settings: the only things a viewer sets here (their name, the role to view
-// as, their unsent drafts), then how review works, read-only. Configuration
+// Settings: the only things a viewer sets here (their name, the theme, the
+// role to view as, their unsent drafts), then how review works, read-only. Configuration
 // is changed where it lives (rules/*.json, the environment before
 // claimguard.run), never in this page, which cannot change the backend.
 
@@ -8,17 +8,19 @@ const SettingsPage = (function () {
   const ACTION_LABELS = {
     view_claim: "View claims", view_findings: "View findings", export_decisions: "Download decisions",
     run_pipeline: "Run the pipeline", append_audit: "Append to the audit log", verify_audit: "Verify the audit log",
-    view_run_events: "See run events (runs, rejections, flags, model failures)", change_ai_settings: "Change AI settings",
+    view_run_events: "See run events (runs, rejections, flags, model failures, who ran each append)", change_ai_settings: "Change AI settings",
   };
 
   function youCard() {
     const input = h("input", { id: "settings-name", class: "input", autocomplete: "name", placeholder: "e.g. Reviewer 01",
       onInput: (e) => { State.reviewer = e.target.value; State.save(); } });
     input.value = State.reviewer;
+    const theme = h("select", { id: "settings-theme", class: "select", onChange: (e) => { State.theme = e.target.value; State.save(); } },
+      THEMES.map(([v, l]) => h("option", { value: v, selected: State.theme === v ? true : null, text: l })));
     const confirmHolder = h("div", { class: "row" });
     function drawDrafts() {
       fill(confirmHolder,
-        button({ label: `Download decisions (${State.drafts.length})`, variant: "primary", icon: "download",
+        button({ label: `Download decisions (${State.drafts.length})`, icon: "download",
           disabled: State.drafts.length === 0, onClick: downloadDecisions }),
         button({ label: "Discard all drafts", variant: "danger", icon: "ban", disabled: State.drafts.length === 0,
           onClick: () => fill(confirmHolder,
@@ -29,7 +31,8 @@ const SettingsPage = (function () {
     drawDrafts();
     return card({ title: "You", meta: "Kept in this browser only", body: h("div", { class: "stack" },
       h("label", { class: "field", for: "settings-name" }, "Your name", input),
-      kv([["Viewing as", State.role === "admin" ? "Admin" : "Reviewer (change it in the top bar)"],
+      h("label", { class: "field", for: "settings-theme" }, "Theme", theme),
+      kv([["Viewing as", State.role === "admin" ? "Admin" : "Reviewer (demo switch in the top bar)"],
         ["Drafts", Core.plural(State.drafts.length, "decision") + " saved in this browser, not yet in the audit log"]]),
       confirmHolder,
       h("p", { class: "muted small", text: "Your name is recorded with each decision." })) });

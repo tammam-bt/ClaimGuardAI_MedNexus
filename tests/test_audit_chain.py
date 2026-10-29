@@ -1,16 +1,21 @@
 """Tests for the audit chain (claimguard.audit.chain)."""
+import getpass
 import hashlib
 import importlib.util
 import io
 import json
 import tempfile
 import unittest
+import unittest.mock
 from contextlib import redirect_stdout
 from pathlib import Path
 
 from claimguard._pack import config, load_jsonl
 from claimguard.ai.watchdog import explain_safely
-from claimguard.audit.chain import AuditError, append, default_anchor, verify
+from claimguard.audit.chain import (
+    GENESIS, AuditError, MissingAnchor, append, default_anchor, lock_path, restore_anchor, verify,
+)
+from claimguard.audit.chain import main as chain_main
 from claimguard.engine.runner import Engine
 from claimguard.guards import screen
 from claimguard.ingest import read_jsonl
@@ -57,7 +62,8 @@ class ChainTests(unittest.TestCase):
 
     def test_the_packs_own_verifier_accepts_our_log(self):
         self.three()
-        self.assertEqual(pack_audit().verify(self.log)[1], 3)
+        append(self.log, [review(claim_id="CG-3")], self.anchor, performed=("claimguard.ui.decisions", "a" * 64))
+        self.assertEqual(pack_audit().verify(self.log)[1], 5)  # append_performed included
 
     def test_edited_event_detected(self):
         self.three()
@@ -140,6 +146,229 @@ class ChainTests(unittest.TestCase):
         self.assertEqual(count, 3)
 
 
+class AnchorTests(unittest.TestCase):
+    """M2: a missing anchor fails. M3: a head recorded outside this machine,
+    and restoring a lost anchor against it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.log = Path(self.tmp.name) / "audit.jsonl"
+        self.anchor = default_anchor(self.log)
+        self.head2, _ = append(self.log, [review(claim_id=f"CG-{i}") for i in range(2)], self.anchor)
+        self.head3, _ = append(self.log, [review(claim_id="CG-2")], self.anchor)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def cli(self, *args):
+        with redirect_stdout(io.StringIO()) as printed:
+            code = chain_main(["--log", str(self.log), *args])
+        return code, printed.getvalue()
+
+    def test_a_missing_anchor_fails_once_the_log_has_events(self):
+        Path(self.anchor).unlink()
+        with self.assertRaisesRegex(MissingAnchor, "3 events but its anchor is missing"):
+            verify(self.log, self.anchor)
+        self.assertEqual(verify(self.log)[1], 3)  # no anchor path given: links only, as the pack checks
+        fresh = Path(self.tmp.name) / "fresh.jsonl"
+        self.assertEqual(verify(fresh, default_anchor(fresh)), (GENESIS, 0))  # a fresh, empty log is fine
+
+    def test_no_append_while_the_anchor_is_missing(self):
+        # Otherwise the next append would quietly write a new, matching anchor.
+        Path(self.anchor).unlink()
+        before = self.log.read_bytes()
+        with self.assertRaises(MissingAnchor):
+            append(self.log, [review(claim_id="CG-X")], self.anchor)
+        self.assertEqual(self.log.read_bytes(), before)
+        self.assertFalse(Path(self.anchor).exists())
+
+    def test_a_head_recorded_outside_still_passes_after_later_appends(self):
+        self.assertEqual(verify(self.log, self.anchor, (2, self.head2))[1], 3)
+        self.assertEqual(verify(self.log, self.anchor, (3, self.head3))[1], 3)
+
+    def test_a_head_recorded_outside_detects_a_rewrite_of_both_files(self):
+        events = [json.loads(line)["event"] for line in self.log.read_text(encoding="utf-8").splitlines()]
+        events[-1] = {**events[-1], "reason": "Altered later."}
+        self.log.unlink()
+        Path(self.anchor).unlink()
+        append(self.log, events, self.anchor)
+        self.assertEqual(verify(self.log, self.anchor)[1], 3)  # the honest limit without an outside head
+        for n, head in ((3, self.head3), (2, self.head2)):  # rewritten rows get new times, so new hashes
+            with self.subTest(n=n), self.assertRaisesRegex(AuditError, f"event {n} does not match"):
+                verify(self.log, self.anchor, (n, head))
+
+    def test_a_head_recorded_outside_covers_only_events_up_to_it(self):
+        # Keep events 1 and 2 byte for byte, replace event 3, and anchor that.
+        lines = self.log.read_text(encoding="utf-8").splitlines(keepends=True)
+        self.log.write_text("".join(lines[:2]), encoding="utf-8")
+        Path(self.anchor).write_text(json.dumps({"count": 2, "head": self.head2}), encoding="utf-8")
+        append(self.log, [review(claim_id="CG-2", reason="Altered later.")], self.anchor)
+        self.assertEqual(verify(self.log, self.anchor, (2, self.head2))[1], 3)
+        with self.assertRaisesRegex(AuditError, "event 3 does not match"):
+            verify(self.log, self.anchor, (3, self.head3))
+
+    def test_a_shorter_log_or_a_malformed_expectation_fails(self):
+        with self.assertRaisesRegex(AuditError, "fewer than the 5"):
+            verify(self.log, self.anchor, (5, self.head3))
+        for bad in ((0, self.head3), (True, self.head3), (2, "XYZ"), (2, self.head2.upper())):
+            with self.subTest(bad=bad), self.assertRaisesRegex(AuditError, "at least 1"):
+                verify(self.log, self.anchor, bad)
+
+    def test_restore_with_the_right_head_lets_appends_work_again(self):
+        Path(self.anchor).unlink()
+        self.assertEqual(restore_anchor(self.log, self.anchor, (3, self.head3)), (self.head3, 3))
+        self.assertEqual(append(self.log, [review(claim_id="CG-3")], self.anchor)[1], 4)
+
+    def test_restore_refuses_and_writes_nothing(self):
+        Path(self.anchor).unlink()
+        for expect, why in (((3, "0" * 64), "event 3 does not match"),
+                            ((2, self.head2), "1 event\\(s\\) after event 2")):
+            with self.subTest(why=why), self.assertRaisesRegex(AuditError, why):
+                restore_anchor(self.log, self.anchor, expect)
+            self.assertFalse(Path(self.anchor).exists())
+        self.assertEqual(restore_anchor(self.log, self.anchor, (2, self.head2), trust_later=True), (self.head3, 3))
+
+    def test_restore_never_overwrites_an_anchor(self):
+        # Overwriting a present anchor is exactly the rewrite M2 detects.
+        before = Path(self.anchor).read_bytes()
+        with self.assertRaisesRegex(AuditError, "already exists"):
+            restore_anchor(self.log, self.anchor, (3, self.head3))
+        self.assertEqual(Path(self.anchor).read_bytes(), before)
+
+    def test_command(self):
+        self.assertEqual(self.cli("--expect-count", "2", "--expect-head", self.head2)[0], 0)
+        self.assertEqual(self.cli("--expect-count", "2", "--expect-head", "0" * 64)[0], 1)
+        Path(self.anchor).unlink()
+        code, printed = self.cli()
+        self.assertEqual(code, 1)
+        self.assertIn("--restore-anchor", printed)  # the error names the way out
+        self.assertEqual(self.cli("--restore-anchor", "--expect-count", "3", "--expect-head", self.head3)[0], 0)
+        self.assertEqual(self.cli()[0], 0)
+        for args in (("--expect-count", "3"), ("--restore-anchor",), ("--trust-events-after-head",)):
+            with self.subTest(args=args), redirect_stdout(io.StringIO()), \
+                    unittest.mock.patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit):
+                chain_main(["--log", str(self.log), *args])
+
+
+MALFORMED_ANCHORS = {
+    "truncated": lambda good: good[: len(good) // 2],
+    "empty": lambda good: b"",
+    "not UTF-8": lambda good: b"\xff\xfe" + good,
+    "a list": lambda good: b"[]",
+    "head missing": lambda good: json.dumps({"count": json.loads(good)["count"]}).encode(),
+    "count a string": lambda good: json.dumps({**json.loads(good), "count": "3"}).encode(),
+    "count negative": lambda good: json.dumps({**json.loads(good), "count": -1}).encode(),
+    "count a boolean": lambda good: json.dumps({**json.loads(good), "count": True}).encode(),
+    "head upper case": lambda good: json.dumps({**json.loads(good), "head": json.loads(good)["head"].upper()}).encode(),
+    "head too short": lambda good: json.dumps({**json.loads(good), "head": "abc"}).encode(),
+}
+
+
+class WriterLockTests(unittest.TestCase):
+    """M4: a second writer is refused; the anchor is replaced in one step."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.log = Path(self.tmp.name) / "audit.jsonl"
+        self.anchor = default_anchor(self.log)
+        self.head, _ = append(self.log, [review(claim_id="CG-0")], self.anchor)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_a_second_writer_is_refused_and_writes_nothing(self):
+        lock_path(self.log).write_text("", encoding="utf-8")  # as a running command holds it
+        before = (self.log.read_bytes(), Path(self.anchor).read_bytes())
+        with self.assertRaisesRegex(AuditError, "another command is writing this audit log"):
+            append(self.log, [review(claim_id="CG-1")], self.anchor)
+        self.assertEqual((self.log.read_bytes(), Path(self.anchor).read_bytes()), before)
+        self.assertTrue(lock_path(self.log).exists())  # the refused writer leaves the holder's lock alone
+        Path(self.anchor).unlink()
+        with self.assertRaisesRegex(AuditError, "another command is writing"):
+            restore_anchor(self.log, self.anchor, (1, self.head))
+        self.assertFalse(Path(self.anchor).exists())
+
+    def test_appends_leave_no_lock_and_no_temporary_anchor(self):
+        append(self.log, [review(claim_id="CG-1")], self.anchor)
+        with self.assertRaises(AuditError):
+            append(self.log, [{"event": "nonsense"}], self.anchor)  # a refused batch releases the lock too
+        Path(self.anchor).unlink()
+        restore_anchor(self.log, self.anchor, (2, verify(self.log)[0]))
+        self.assertEqual(sorted(p.name for p in Path(self.tmp.name).iterdir()), ["audit.head.json", "audit.jsonl"])
+
+    def test_a_log_in_a_new_folder_can_be_locked(self):
+        log = Path(self.tmp.name) / "new" / "folder" / "audit.jsonl"
+        self.assertEqual(append(log, [review()], default_anchor(log))[1], 1)
+        self.assertFalse(lock_path(log).exists())
+
+    def test_a_malformed_anchor_raises_audit_error(self):
+        good = Path(self.anchor).read_bytes()
+        before = self.log.read_bytes()
+        for name, damage in MALFORMED_ANCHORS.items():
+            Path(self.anchor).write_bytes(damage(good))
+            with self.subTest(name), self.assertRaisesRegex(AuditError, "the anchor (is malformed|cannot be read)"):
+                verify(self.log, self.anchor)
+            with self.subTest(name), self.assertRaises(AuditError):
+                append(self.log, [review(claim_id="CG-1")], self.anchor)
+            self.assertEqual(self.log.read_bytes(), before)
+            with self.subTest(name), redirect_stdout(io.StringIO()) as printed:
+                self.assertEqual(chain_main(["--log", str(self.log)]), 1)
+            self.assertIn("Audit chain INVALID: the anchor", printed.getvalue())
+        Path(self.anchor).write_bytes(good)
+        self.assertEqual(verify(self.log, self.anchor), (self.head, 1))
+
+    def test_a_run_refused_by_the_lock_exits_2_and_records_nothing(self):
+        lock_path(self.log).write_text("", encoding="utf-8")
+        before = self.log.read_bytes()
+        with redirect_stdout(io.StringIO()) as printed:
+            code = run_main(["--strict", "--input", str(STRESS), "--output", str(Path(self.tmp.name) / "p.jsonl"),
+                             "--audit-log", str(self.log)])
+        self.assertEqual(code, 2)
+        self.assertIn("another command is writing", printed.getvalue())
+        self.assertEqual(self.log.read_bytes(), before)
+
+
+class AppendPerformedTests(unittest.TestCase):
+    """M5: each command's batch ends with exactly one append_performed."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.log = Path(self.tmp.name) / "audit.jsonl"
+        self.anchor = default_anchor(self.log)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def events(self):
+        return [row["event"] for row in load_jsonl(self.log)] if self.log.exists() else []
+
+    def test_one_per_batch_closing_it(self):
+        batch = [review(claim_id=f"CG-{i}") for i in range(3)]
+        self.assertEqual(append(self.log, batch, self.anchor, performed=("claimguard.ui.decisions", "b" * 64))[1], 4)
+        self.assertEqual(self.events()[:3], batch)
+        self.assertEqual(self.events()[3], {"event": "append_performed", "command": "claimguard.ui.decisions",
+                                            "os_user": getpass.getuser(), "input_sha256": "b" * 64, "events": 3})
+        append(self.log, [review(claim_id="CG-3")], self.anchor, performed=("claimguard.review.correct", "c" * 64))
+        self.assertEqual([e["events"] for e in self.events() if e["event"] == "append_performed"], [3, 1])
+
+    def test_an_empty_batch_writes_none(self):
+        append(self.log, [review()], self.anchor, performed=("claimguard.ui.decisions", "b" * 64))
+        before = self.log.read_bytes()
+        self.assertEqual(append(self.log, [], self.anchor, performed=("claimguard.ui.decisions", "b" * 64))[1], 2)
+        self.assertEqual(self.log.read_bytes(), before)
+
+    def test_an_unknown_os_user_never_fails_the_append(self):
+        # From 3.13 getpass.getuser() raises OSError when it finds no user.
+        for error in (OSError("no user"), KeyError("uid"), ImportError("pwd")):
+            with self.subTest(error=type(error).__name__),                     unittest.mock.patch("claimguard.audit.chain.getpass.getuser", side_effect=error):
+                append(self.log, [review()], self.anchor, performed=("claimguard.run", "d" * 64))
+            self.assertEqual(self.events()[-1]["os_user"], "unknown")
+
+    def test_without_a_command_nothing_is_added(self):
+        append(self.log, [review()], self.anchor)  # library use, as the tamper demonstration does
+        self.assertEqual([e["event"] for e in self.events()], ["review_decision"])
+
+
 class RunWritesAuditTests(unittest.TestCase):
     def test_run_records_start_flags_and_finish(self):
         with tempfile.TemporaryDirectory() as d:
@@ -149,11 +378,16 @@ class RunWritesAuditTests(unittest.TestCase):
             self.assertEqual(code, 0)
             events = [json.loads(l)["event"] for l in log.read_text(encoding="utf-8").splitlines()]
             kinds = [e["event"] for e in events]
-            self.assertEqual((kinds[0], kinds[-1]), ("run_started", "run_finished"))
+            self.assertEqual((kinds[0], kinds[-2], kinds[-1]), ("run_started", "run_finished", "append_performed"))
+            self.assertEqual(kinds.count("append_performed"), 1)
+            performed = events[-1]
+            self.assertEqual((performed["command"], performed["input_sha256"], performed["events"]),
+                             ("claimguard.run", events[0]["input_sha256"], len(events) - 1))
+            self.assertEqual(performed["input_sha256"], hashlib.sha256(STRESS.read_bytes()).hexdigest())
             self.assertTrue(kinds.count("injection_flag") >= 1)
-            self.assertEqual(len({e["run_id"] for e in events}), 1)
+            self.assertEqual(len({e["run_id"] for e in events[:-1]}), 1)
             manifest = Path(f"{out}.manifest.json")
-            self.assertEqual(events[-1]["manifest_sha256"], hashlib.sha256(manifest.read_bytes()).hexdigest())
+            self.assertEqual(events[-2]["manifest_sha256"], hashlib.sha256(manifest.read_bytes()).hexdigest())
             self.assertEqual(verify(log, default_anchor(log))[1], len(events))
 
 

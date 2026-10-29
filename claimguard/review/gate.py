@@ -99,20 +99,23 @@ def outcome(route: Mapping[str, Any], events: Sequence[Mapping[str, Any]], input
     return "rechecked" if has_versions else "to_review"
 
 
-def _decisions(log, anchor) -> List[Mapping[str, Any]]:
+def _decisions(log, anchor, expect=None) -> List[Mapping[str, Any]]:
     try:
-        chain.verify(log, anchor or chain.default_anchor(log))
+        chain.verify(log, anchor or chain.default_anchor(log), expect)
     except chain.AuditError as e:
-        raise GateError(f"the audit log cannot be trusted: {e}") from None
+        error = GateError(f"the audit log cannot be trusted: {e}")
+        error.missing_anchor = isinstance(e, chain.MissingAnchor)
+        raise error from None
     if not Path(log).exists():
         return []
     return [row["event"] for row in load_jsonl(log) if row["event"].get("event") == "review_decision"]
 
 
 def judge(results_path, claims_path, log, directory: Mapping[str, str], *, anchor=None,
-          corrections=None) -> List[Dict[str, Any]]:
-    """One row per claim of the claims file, in its order. Raises GateError."""
-    events = _decisions(log, anchor)
+          corrections=None, expect=None) -> List[Dict[str, Any]]:
+    """One row per claim of the claims file, in its order. expect is a
+    (count, head) recorded outside this machine. Raises GateError."""
+    events = _decisions(log, anchor, expect)
     try:
         results = load_jsonl(results_path)
     except (OSError, ValueError) as e:
@@ -154,6 +157,20 @@ def judge(results_path, claims_path, log, directory: Mapping[str, str], *, ancho
     return rows
 
 
+def write_rows(path, rows) -> None:
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+
+
+def verdict(rows) -> str:
+    """One line: how many claims are ready, and why the others are blocked."""
+    blocked = Counter(r["state"] for r in rows if not r["ready"])
+    ready = len(rows) - sum(blocked.values())
+    detail = ", ".join(f"{n} {state}" for state, n in sorted(blocked.items()))
+    return f"{len(rows)} claims: {ready} ready, {sum(blocked.values())} blocked" + (f" ({detail})" if detail else "") + "."
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--results", required=True, help="the run's results")
@@ -163,22 +180,24 @@ def main(argv=None) -> int:
     p.add_argument("--directory", required=True, help="JSON {actor: role}, e.g. actors.example.json")
     p.add_argument("--corrections", help="folder written by python -m claimguard.review.correct")
     p.add_argument("--output", help="also write one JSON row per claim to this file")
+    chain.add_expect_arguments(p)
     a = p.parse_args(argv)
+    expect = chain.expected(p, a)
     try:
         rows = judge(a.results, a.claims, a.log, load_directory(a.directory), anchor=a.anchor,
-                     corrections=a.corrections)
+                     corrections=a.corrections, expect=expect)
+        head, count = chain.verify(a.log, a.anchor or chain.default_anchor(a.log))
     except (GateError, ValueError) as e:
         print(f"Gate cannot judge: {e}")
+        if getattr(e, "missing_anchor", False):
+            print(chain.RESTORE_HINT)
         return 2
     if a.output:
-        out = Path(a.output)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
-    blocked = Counter(r["state"] for r in rows if not r["ready"])
-    ready = len(rows) - sum(blocked.values())
-    detail = ", ".join(f"{n} {state}" for state, n in sorted(blocked.items()))
-    print(f"{len(rows)} claims: {ready} ready, {sum(blocked.values())} blocked" + (f" ({detail})" if detail else "") + ".")
-    return 1 if blocked else 0
+        write_rows(a.output, rows)
+    print(verdict(rows))
+    if count:
+        print(chain.record_hint(count, head))
+    return 1 if any(not r["ready"] for r in rows) else 0
 
 
 if __name__ == "__main__":

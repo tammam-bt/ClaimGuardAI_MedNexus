@@ -105,6 +105,13 @@ const A11Y = `(() => {
   if (dup.length) problems.push('duplicate ids ' + [...new Set(dup)].join(','));
   if (!document.documentElement.lang) problems.push('no lang');
   if (document.querySelectorAll('h1').length !== 1) problems.push(document.querySelectorAll('h1').length + ' h1');
+  // Headings never skip a level going down (h1 then h3).
+  let level = 0;
+  for (const el of document.querySelectorAll('h1, h2, h3, h4, h5, h6')) {
+    const n = Number(el.tagName[1]);
+    if (n > level + 1) problems.push('heading h' + n + ' after h' + level + ': ' + el.textContent.trim().slice(0, 40));
+    level = n;
+  }
   return problems;
 })()`;
 
@@ -137,6 +144,27 @@ async function goTo(hash) {
 }
 const text = (sel) => evaluate(`(document.querySelector(${JSON.stringify(sel)}) || {}).textContent || null`);
 
+// Real key presses and typing, for the keyboard-only flow.
+const KEYS = { Tab: ["Tab", 9], Enter: ["Enter", 13, "\r"], " ": ["Space", 32, " "], j: ["KeyJ", 74, "j"], k: ["KeyK", 75, "k"],
+  End: ["End", 35], Escape: ["Escape", 27], ArrowRight: ["ArrowRight", 39] };
+async function press(key, modifiers = 0) {
+  const [code, vk, chars] = KEYS[key];
+  await page("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode: vk, modifiers, text: chars });
+  await page("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode: vk, modifiers });
+  await sleep(60);
+}
+const typeText = (t) => page("Input.insertText", { text: t });
+// Tab until the focused element matches; returns the number of presses.
+async function tabUntil(expression, max = 80) {
+  for (let n = 1; n <= max; n++) {
+    await press("Tab");
+    if (await evaluate(`(() => { const el = document.activeElement; return !!(${expression}); })()`)) return n;
+  }
+  throw new Error(`Tab never reached ${expression}`);
+}
+const focused = () => evaluate("(document.activeElement.id || document.activeElement.textContent || '').trim()");
+const selectedRule = () => evaluate("(document.querySelector('.ws-list [aria-selected=true]') || {}).dataset?.rule || null");
+
 const out = { errors, network };
 try {
   const { targetId } = await send("Target.createTarget", { url: "about:blank" });
@@ -149,7 +177,7 @@ try {
   // ---- every page draws
   await open(pagePath, "#/dashboard");
   out.pages = {};
-  for (const key of ["dashboard", "queue", "claims", "audit", "rules", "evaluation", "settings", "components"]) {
+  for (const key of ["dashboard", "queue", "claims", "claims/CG-785C09BD9CC8", "audit", "rules", "evaluation", "settings", "components"]) {
     await goTo(`#/${key}`);
     out.pages[key] = {
       a11y: await evaluate(A11Y),
@@ -158,7 +186,19 @@ try {
       crashed: await evaluate("document.querySelector('.content').textContent.includes('could not be drawn')"),
     };
   }
-  out.sidebarSame = await evaluate("document.querySelectorAll('.nav__item').length");
+  // The nav is the same on every page; a reviewer's is shorter, the rest under "More".
+  const NAV = "[...document.querySelectorAll('.nav > a.nav__item')].map(a => a.querySelector('.nav__label').textContent)";
+  const MORE = "[...document.querySelectorAll('.nav__more a.nav__item')].map(a => a.querySelector('.nav__label').textContent)";
+  out.sidebarSame = { reviewer: { main: await evaluate(NAV), more: await evaluate(MORE) } };
+  await goTo("#/audit");
+  out.sidebarSame.moreOpenOnItsPage = await evaluate("document.querySelector('.nav__more').open");
+
+  // An address without a page opens the reviewer's home: the Review Queue.
+  await page("Page.navigate", { url: "about:blank" });
+  await sleep(100);
+  await page("Page.navigate", { url: pathToFileURL(pagePath).href });
+  await waitFor("document.querySelector('.content') && document.querySelector('.content').children.length");
+  out.home = { title: await text(".topbar h1"), current: await evaluate("document.querySelector('.nav__item[aria-current=page] .nav__label').textContent") };
 
   // ---- keyboard: the skip link is the first stop and lands on the content
   await open(pagePath, "#/dashboard");  // a real reload: Tab starts from the top
@@ -168,17 +208,116 @@ try {
   await evaluate("document.activeElement.click()");
   out.keyboard.afterSkip = await evaluate("document.activeElement.id");
 
-  // ---- 1280 px: no page scrolls sideways
-  await page("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  // ---- 375, 768, 1280 and 1440 px: no page scrolls sideways
   out.narrow = {};
-  for (const key of ["dashboard", "queue", "claims", "claims/CG-785C09BD9CC8", "audit", "rules", "rules/R013", "evaluation", "settings"]) {
-    await goTo(`#/${key}`);
-    out.narrow[key] = await evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth");
+  for (const width of [375, 768, 1280, 1440]) {
+    await page("Emulation.setDeviceMetricsOverride", { width, height: 812, deviceScaleFactor: 1, mobile: false });
+    out.narrow[width] = {};
+    for (const key of ["dashboard", "queue", "claims", "claims/CG-785C09BD9CC8", "audit", "rules", "rules/R013", "evaluation", "settings", "components"]) {
+      await goTo(`#/${key}`);
+      out.narrow[width][key] = await evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth");
+      // What sticks out, to say why in the test's message.
+      if (out.narrow[width][key] > 0) out.narrow[width][`${key} (wide)`] = await evaluate(`[...document.querySelectorAll('body *')]
+        .filter((e) => e.getBoundingClientRect().right > document.documentElement.clientWidth + 1).slice(0, 6)
+        .map((e) => e.tagName.toLowerCase() + '.' + e.className)`);
+    }
   }
+
+  // The same at 375 px with a wide font forced on everything (Verdana, or
+  // DejaVu Sans on Linux): a select is as wide as its longest option, so a
+  // page that fits with Segoe UI can still scroll on another system.
+  await page("Emulation.setDeviceMetricsOverride", { width: 375, height: 812, deviceScaleFactor: 1, mobile: false });
+  await evaluate(`(() => { const s = document.createElement('style'); s.id = 'wide-font';
+    s.textContent = '*, *::before, *::after { font-family: Verdana, "DejaVu Sans", sans-serif !important; }';
+    document.head.appendChild(s); })()`);
+  out.narrowWideFont = {};
+  for (const key of ["dashboard", "queue", "claims", "claims/CG-785C09BD9CC8", "audit", "rules", "rules/R013", "evaluation", "settings", "components"]) {
+    await goTo(`#/${key}`);
+    out.narrowWideFont[key] = await evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth");
+    if (out.narrowWideFont[key] > 0) out.narrowWideFont[`${key} (wide)`] = await evaluate(`[...document.querySelectorAll('body *')]
+      .filter((e) => e.getBoundingClientRect().right > document.documentElement.clientWidth + 1).slice(0, 6)
+      .map((e) => e.tagName.toLowerCase() + '.' + e.className)`);
+  }
+  await evaluate("document.getElementById('wide-font').remove()");
+
+  // ---- below 1100 px the sidebar is a drawer
+  const drawerState = () => evaluate(`({ expanded: document.querySelector('.menu-btn').getAttribute('aria-expanded'),
+    sidebarInert: document.getElementById('sidebar').inert, mainInert: document.querySelector('.main').inert,
+    focused: document.activeElement.classList.contains('menu-btn') ? 'menu' : (document.activeElement.textContent || '').trim() })`);
+  await page("Emulation.setDeviceMetricsOverride", { width: 375, height: 812, deviceScaleFactor: 1, mobile: false });
+  await goTo("#/queue");
+  out.drawer = { closed: await drawerState(), buttonShown: await evaluate("getComputedStyle(document.querySelector('.menu-btn')).display !== 'none'") };
+  await evaluate("document.querySelector('.menu-btn').focus()");
+  await press("Enter");
+  await sleep(100);
+  out.drawer.open = await drawerState();
+  await press("Escape");
+  await sleep(100);
+  out.drawer.afterEscape = await drawerState();
+  await evaluate("document.querySelector('.menu-btn').click()");
+  await sleep(100);
+  await evaluate("[...document.querySelectorAll('.nav__item')].find(a => a.textContent.includes('Claims')).click()");
+  await sleep(250);
+  out.drawer.afterLink = { hash: await evaluate("location.hash"), ...(await drawerState()) };
+  // Stacked panes: "show in claim" takes the focus to the field, Escape brings it back.
+  await goTo("#/claims/CG-785C09BD9CC8");
+  await evaluate("document.querySelector('#finding-R003 .chip').focus()");
+  await press("Enter");
+  await sleep(100);
+  out.stackedThread = { focusedPath: await evaluate("document.activeElement.dataset.path || null") };
+  await press("Escape");
+  out.stackedThread.back = await evaluate("document.activeElement.classList.contains('chip')");
+  await evaluate("document.activeElement.click()");  // un-press it
+  await page("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await goTo("#/queue");
+  out.drawer.wide = await evaluate("({ inert: document.getElementById('sidebar').inert, buttonShown: getComputedStyle(document.querySelector('.menu-btn')).display !== 'none' })");
   await page("Emulation.clearDeviceMetricsOverride");
+
+  // ---- tabs: one stop, the arrow keys move and open
+  await goTo("#/components");
+  await evaluate("document.querySelector('[role=tab][aria-selected=true]').focus()");
+  await press("ArrowRight");
+  out.tabs = await evaluate(`({ focused: document.activeElement.id, selected: document.activeElement.getAttribute('aria-selected'),
+    stops: document.querySelectorAll('[role=tab][tabindex="0"]').length,
+    panel: document.querySelector('[role=tabpanel]').getAttribute('aria-labelledby') })`);
   await goTo("#/dashboard");
   out.dashboard = { lifecycle: await text(".lifecycle"), stats: await text(".grid--4"), rejected: await text("#sec-rejected"),
     page: await text(".content"), sidebar: await text(".sidebar") };
+  // A command center: every card names its source, every number opens its list.
+  Object.assign(out.dashboard, await evaluate(`(() => {
+    const cards = [...document.querySelectorAll('.content .card')].filter(c => c.querySelector('.card__title'));
+    return {
+      titles: cards.map(c => c.querySelector('.card__title').textContent),
+      unsourced: cards.filter(c => !(c.querySelector('.card__meta') || {}).textContent?.includes('Source:')).map(c => c.querySelector('.card__title').textContent),
+      statSources: [...document.querySelectorAll('.grid--4 .stat')].map(s => (s.querySelector('.stat__source') || {}).textContent || null),
+      statLinks: [...document.querySelectorAll('.grid--4 .stat')].map(s => s.getAttribute('href')),
+      barLinks: [...document.querySelectorAll('.content a.bar')].map(a => a.getAttribute('href')),
+      ruleLinks: [...document.querySelectorAll('.content .row-link')].map(a => a.getAttribute('href')),
+      drafts: [...document.querySelectorAll('.content .card')].find(c => c.textContent.startsWith('Your drafts'))?.textContent || null,
+    };
+  })()`));
+  await goTo("#/dashboard?focus=rejected");
+  await sleep(100);
+  out.dashboard.focusRejected = await evaluate("document.activeElement.id");
+
+  // ---- motion: the animations running one frame after a navigation, then
+  // the same with reduced motion asked for
+  const ANIMS_AFTER = (hash) => `(async () => {
+    const changed = new Promise((r) => addEventListener('hashchange', r, { once: true }));
+    location.hash = ${JSON.stringify(hash)};
+    await changed;
+    await new Promise((r) => requestAnimationFrame(() => r()));
+    return { pageEnter: !!document.querySelector('.content > .page-enter'),
+      anims: document.getAnimations().map((a) => ({ name: a.animationName || 'transition ' + a.transitionProperty, on: (a.effect.target.className || a.effect.target.tagName || '') + (a.effect.pseudoElement || ''), end: Math.round(a.effect.getComputedTiming().endTime) })) };
+  })()`;
+  await goTo("#/queue");
+  out.motion = { dashboard: await evaluate(ANIMS_AFTER("#/dashboard")) };
+  await goTo("#/claims/CG-785C09BD9CC8");
+  out.motion.claim = await evaluate(ANIMS_AFTER("#/rules"));
+  await page("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+  await goTo("#/queue");
+  out.motion.reduced = await evaluate(ANIMS_AFTER("#/dashboard"));
+  await page("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
 
   // ---- audit: the role decides which events show
   await goTo("#/audit");
@@ -186,6 +325,8 @@ try {
   await evaluate(`(() => { const s = document.querySelector('.topbar select'); s.value = 'admin'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
   await sleep(200);
   out.audit.admin = { count: await text(".filters__count"), types: await evaluate("[...document.querySelectorAll('.table tbody tr')].map(r => r.children[2].textContent)") };
+  out.sidebarSame.admin = await evaluate(NAV);
+  out.sidebarSame.adminMore = await evaluate("document.querySelectorAll('.nav__more').length");
   await evaluate(`(() => { const s = document.querySelector('.topbar select'); s.value = 'reviewer'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
   await sleep(200);
 
@@ -210,9 +351,39 @@ try {
     count: await text(".filters__count"),
     firstRoutes: await evaluate("[...document.querySelectorAll('.table tbody tr')].slice(0, 3).map(r => r.children[1].textContent)"),
   };
+  out.queueRows = {
+    drawn: await evaluate("document.querySelectorAll('.table tbody tr').length"),
+    fingerprints: await evaluate("document.querySelectorAll('.table tbody tr .fingerprint').length"),
+    foot: await text(".table-foot"),
+    stops: await evaluate("document.querySelectorAll('.table tbody [tabindex=\"0\"]').length"),
+    next: await text(".next-claim"),
+  };
+  // Keyboard: the table is one stop; j / k move, Tab leaves, Enter opens.
+  await evaluate("document.getElementById('content').focus()");
+  out.queueKb = { tabsToTable: await tabUntil("el.classList.contains('row-link')") };
+  out.queueKb.first = await evaluate("document.activeElement.textContent.slice(0, 15)");
+  await press("j");
+  await press("j");
+  out.queueKb.afterJJ = await evaluate("[...document.querySelectorAll('.row-link')].indexOf(document.activeElement)");
+  await press("k");
+  out.queueKb.afterK = await evaluate("[...document.querySelectorAll('.row-link')].indexOf(document.activeElement)");
+  await press("End");
+  out.queueKb.afterEnd = await evaluate("[...document.querySelectorAll('.row-link')].indexOf(document.activeElement)");
+  await press("Tab");
+  out.queueKb.afterTab = await evaluate("document.activeElement.classList.contains('row-link') ? 'row' : document.activeElement.textContent.trim()");
+  await evaluate("[...document.querySelectorAll('.table-foot button')].find(b => b.textContent.startsWith('Show')).click()");
+  await sleep(100);
+  out.queueKb.afterMore = { drawn: await evaluate("document.querySelectorAll('.table tbody tr').length"),
+    focused: await evaluate("[...document.querySelectorAll('.row-link')].indexOf(document.activeElement)") };
+  await evaluate("document.querySelector('.row-link').focus()");
+  await press("Enter");
+  await sleep(200);
+  out.queueKb.enterOpens = await evaluate("location.hash");
+  await goTo("#/queue");
   await evaluate("document.querySelector('.table tbody tr').click()");
   await sleep(200);
   out.queueRowOpens = await evaluate("location.hash");
+  out.backLink = await evaluate("(() => { const a = document.querySelector('.claim-head__title a'); return { text: a.textContent, href: a.getAttribute('href') }; })()");
 
   // ---- the decision flow on a claim with two findings
   const cid = "CG-785C09BD9CC8";
@@ -223,34 +394,67 @@ try {
   out.sidebarUserBefore = await text(".sidebar__user");
   out.saveDisabledWithoutName = await evaluate("[...document.querySelectorAll('#finding-R003 button')].find(b => b.textContent.includes('Save')).disabled");
 
-  const decide = async (rule, actionLabel, reason) => {
-    await evaluate(`(() => {
-      const f = document.querySelector('#finding-${rule}');
-      [...f.querySelectorAll('button')].find(b => b.textContent.trim() === ${JSON.stringify(actionLabel)}).click();
-    })()`);
-    await evaluate(`(() => {
-      const t = document.querySelector('#reason-${rule}');
-      t.value = ${JSON.stringify(reason)};
-      t.dispatchEvent(new Event('input', { bubbles: true }));
-      [...document.querySelectorAll('#finding-${rule} button')].find(b => b.textContent.includes('Save') || b.textContent.includes('Replace')).click();
-    })()`);
+  // Keyboard only, from the top of the content (where the skip link lands):
+  // Tab to the findings list, j/k to move, Enter to open, Tab to an action,
+  // Space to press it, type the reason, Tab to Save, Enter; Dismiss asks once
+  // more, with the focus on "Yes, dismiss".
+  // The evidence thread draws itself under the field a chip points at.
+  out.motion.thread = await evaluate(`(async () => {
+    const chip = document.querySelector('#finding-R003 .chip');
+    chip.click();
+    await new Promise((r) => requestAnimationFrame(() => r()));
+    const names = document.getAnimations().map((a) => a.animationName || 'transition ' + a.transitionProperty);
+    chip.click();
+    return names;
+  })()`);
+
+  out.kb = {};
+  await evaluate("document.getElementById('content').focus()");
+  out.kb.tabsToList = await tabUntil("el.getAttribute('role') === 'option'");
+  out.kb.firstOption = await evaluate("document.activeElement.dataset.rule");
+  await press("j");
+  out.kb.afterJ = { selected: await selectedRule(), focused: await focused() };
+  await press("k");
+  out.kb.afterK = await selectedRule();
+  // Enter moves into the finding, Escape back to the list.
+  await evaluate("document.getElementById('opt-R003').focus()");
+  await press("Enter");
+  out.kb.escape = { into: await focused() };
+  await press("Escape");
+  out.kb.escape.back = await focused();
+  const decide = async (rule, actionLabel, reason, name) => {
+    for (let n = 0; n < 20 && (await selectedRule()) !== rule; n++) await press("j");
+    await evaluate(`document.getElementById('opt-${rule}').focus()`);
+    await press("Enter");
+    const opened = await focused();
+    const toAction = await tabUntil(`el.textContent.trim() === ${JSON.stringify(actionLabel)}`);
+    await press(" ");
+    await tabUntil(`el.id === 'reason-${rule}'`);
+    await typeText(reason);
+    if (name) { await tabUntil(`el.id === 'name-${rule}'`); await typeText(name); }
+    await tabUntil("el.textContent.includes('Save draft') || el.textContent.includes('Replace the draft')");
+    await press("Enter");
+    const confirm = await focused();
+    if (actionLabel === "Dismiss with reason") await press("Enter");
+    await sleep(150);
+    return { opened, toAction, confirm, nowSelected: await selectedRule(), nowFocused: await focused() };
   };
 
-  await evaluate(`(() => { const i = document.querySelector('#reviewer-name'); i.value = 'Reviewer 01'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-  await decide("R003", "Dismiss with reason", "Coverage extension confirmed by the payer.");
-  out.afterOne = { head: await text(".claim-head__title"), lifecycle: await text(".lifecycle"), count: await text(".nav__count") };
-  await decide("R004", "Dismiss with reason", "Member record corrected upstream.");
-  out.afterTwo = { head: await text(".claim-head__title"), count: await text(".nav__count") };
+  out.kb.first = await decide("R003", "Dismiss with reason", "Coverage extension confirmed by the payer.", "Reviewer 01");
+  out.afterOne = { head: await text(".claim-head__title"), lifecycle: await text(".lifecycle"), count: await text(".nav__count"),
+    saved: await evaluate("(document.querySelector('.ws-item__state.is-saved') || {}).parentElement?.dataset.rule || null") };
+  out.kb.second = await decide("R004", "Dismiss with reason", "Member record corrected upstream.");
+  out.afterTwo = { head: await text(".claim-head__title"), count: await text(".nav__count"), next: await text("#next-claim") };
   out.drafts = await evaluate(`JSON.parse(localStorage.getItem('claimguard.drafts.' + JSON.parse(document.getElementById('claimguard-data').textContent).run.run_id))`);
   out.reviewerShown = await text(".sidebar__user-name");
   await goTo("#/queue");
-  out.queueAfter = { count: await text(".filters__count"), drafts: await text(".grid--4 .card:nth-child(4) .stat__value") };
+  out.queueAfter = { count: await text(".filters__count"), drafts: await text(".content .callout__title") };
   await goTo("#/queue?show=all");
   out.queueAll = await text(".filters__count");
   await goTo(`#/claims/${cid}`);
 
   // Replacing a decision keeps one draft per finding.
-  await decide("R004", "Request information", "Need the member card.");
+  out.kb.replace = await decide("R004", "Request information", "Need the member card.");
   out.afterReplace = { head: await text(".claim-head__title"), drafts: await evaluate(`JSON.parse(localStorage.getItem('claimguard.drafts.' + JSON.parse(document.getElementById('claimguard-data').textContent).run.run_id)).length`) };
 
   // ---- the decisions download is a real file, under the page's Content-Security-Policy
@@ -291,6 +495,34 @@ try {
   // List filters reach the URL.
   await goTo("#/claims?route=REVIEW");
   out.filtered = { count: await text(".filters__count"), hash: await evaluate("location.hash") };
+  // The sort reaches the URL too, and a link with it opens sorted.
+  await evaluate("document.querySelector('th[data-key=total] button').click()");
+  await sleep(100);
+  out.filtered.sortedHash = await evaluate("location.hash");
+  await goTo("#/claims?route=REVIEW&sort=-total");
+  out.filtered.linkSort = await evaluate("document.querySelector('th[data-key=total]').getAttribute('aria-sort')");
+
+  // ---- a browser that will not store the draft: the page says so and the
+  // reason is not lost
+  const other = await evaluate(`JSON.parse(document.getElementById('claimguard-data').textContent).claims
+    .find((c) => c.route.reasons.length && !c.flag && c.claim.claim_id !== ${JSON.stringify(cid)}).claim.claim_id`);
+  await goTo(`#/claims/${other}`);
+  await evaluate("Storage.prototype.__setItem = Storage.prototype.setItem; Storage.prototype.setItem = function () { throw new DOMException('full', 'QuotaExceededError'); }");
+  const failRule = await selectedRule();
+  await evaluate(`(() => {
+    const f = document.getElementById('finding-${failRule}');
+    [...f.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Request information').click();
+    const t = document.getElementById('reason-${failRule}');
+    t.value = 'Kept although storage failed.';
+    t.dispatchEvent(new Event('input', { bubbles: true }));
+    [...f.querySelectorAll('button')].find((b) => b.textContent.includes('Save draft')).click();
+  })()`);
+  await sleep(150);
+  out.storageFailure = {
+    alert: await evaluate(`(document.querySelector('#finding-${failRule} [role=alert]') || {}).textContent || null`),
+    kept: await evaluate(`document.querySelector('#finding-${failRule}').textContent.includes('Kept although storage failed.')`),
+  };
+  await evaluate("Storage.prototype.setItem = Storage.prototype.__setItem");
 
   // ---- hostile claim text never runs
   await open(hostilePath, "#/claims");

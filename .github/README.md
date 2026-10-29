@@ -79,7 +79,7 @@ python -m claimguard.ui --results outputs/dev_predictions.jsonl --claims data/de
   --audit-log outputs/audit.jsonl --gold data/development/expected_results.jsonl
 ```
 
-Open `outputs/claimguard.html`. It has seven pages: Dashboard, Review Queue, Claims, Audit Logs, Rules, Evaluation and Settings. On a claim, the reviewer decides each finding (confirm, dismiss with a reason, request information, or corrected and recheck) and downloads the decisions. `python -m claimguard.ui.decisions` checks every decision and appends them to the audit chain. `python -m claimguard.review.correct` turns a correction into a new version of the claim and runs all 15 rules on it. `--gold` adds the Evaluation page; leave it out for claims without expected results.
+Open `outputs/claimguard.html`. It has seven pages: Dashboard, Review Queue, Claims, Audit Logs, Rules, Evaluation and Settings. On a claim, the reviewer decides each finding (confirm, dismiss with a reason, request information, or corrected and recheck) and downloads the decisions. `python -m claimguard.ui.decisions` checks every decision and appends them to the audit chain; `python -m claimguard.ui.apply` does that, runs the gate and rebuilds the page in one step. `python -m claimguard.review.correct` turns a correction into a new version of the claim and runs all 15 rules on it. `--gold` adds the Evaluation page; leave it out for claims without expected results.
 
 Commands, options, roles and the page's security: [docs/INTERFACE.md](../docs/INTERFACE.md).
 
@@ -115,6 +115,11 @@ python -m claimguard.review.correct --claims data/development/claims.jsonl --cla
   --directory actors.json --log outputs/audit.jsonl --output outputs/corrections
 python -m claimguard.review.gate --results outputs/dev_predictions.jsonl --claims data/development/claims.jsonl \
   --log outputs/audit.jsonl --directory actors.json --corrections outputs/corrections   # exit 0: every claim ready
+
+# Or all at once: append the decisions, run the gate, rebuild the page
+python -m claimguard.ui.apply --decisions review_decisions_<run>.jsonl --log outputs/audit.jsonl \
+  --directory actors.json --results outputs/dev_predictions.jsonl --claims data/development/claims.jsonl \
+  --corrections outputs/corrections
 
 # Reviewer feedback, the tamper demonstration, the explanation exercises
 python -m claimguard.review.feedback --log outputs/audit.jsonl
@@ -170,4 +175,5 @@ Roles 4 and 5 were committed from Mohammed Aziz Kadri's account (PRs #14 and #15
 | `docs/INTERFACE.md` | The review interface: pages, decisions, corrections, security |
 | `docs/ARCHITECTURE_DECISIONS.md` · `docs/DECISIONS.md` | Engineering decisions · rule clarifications and open mentor questions |
 | `docs/EVALUATION_REPORT.md` · `docs/PRIVACY_SECURITY.md` · `docs/AI_SCORECARD.md` | Phase 2 deliverables: test evaluation report · privacy and security note · explanation scorecard |
+| `docs/READINESS.md` | Readiness note: what is tested, only documented, or independently verified, and the known limits |
 | `CONTRIBUTING.md` | How the team works |

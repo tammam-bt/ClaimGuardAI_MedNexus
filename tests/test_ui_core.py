@@ -11,6 +11,7 @@ import subprocess
 import unittest
 from pathlib import Path
 
+from claimguard.audit.chain import EVENT_FIELDS
 from claimguard.review.routing import outstanding
 from claimguard.ui.page import JS_FILES, STATIC
 
@@ -21,6 +22,27 @@ NODE = shutil.which("node")
 
 def js_sources():
     return {name: (STATIC / name).read_text(encoding="utf-8") for name in JS_FILES}
+
+
+def css_rules():
+    """(selector, declarations) of every innermost rule of app.css, so a
+    rule inside @media is read like any other."""
+    css = re.sub(r"/\*.*?\*/", "", (STATIC / "app.css").read_text(encoding="utf-8"), flags=re.S)
+    rules, stack, start = [], [], 0
+    for i, ch in enumerate(css):
+        if ch == "{":
+            if stack:
+                stack[-1][2] = True  # it holds rules, not declarations
+            stack.append([css[start:i].strip(), i + 1, False])
+            start = i + 1
+        elif ch == "}":
+            selector, body_start, nested = stack.pop()
+            if not nested:
+                rules.append((selector, css[body_start:i]))
+            start = i + 1
+        elif ch == ";" and not stack:
+            start = i + 1
+    return rules
 
 
 def sprite_ids():
@@ -88,9 +110,70 @@ class ConsistencyTests(unittest.TestCase):
             self.assertIsNone(banned.search(text), name)
 
     def test_colors_live_only_in_the_tokens(self):
+        rules = css_rules()
+        self.assertEqual([s for s, _ in rules if s.startswith(":root")],
+                         [":root", ':root,\n:root[data-theme="light"]', ':root:not([data-theme="light"])', ':root[data-theme="dark"]'])
+        for selector, body in rules:
+            if not selector.startswith(":root"):
+                self.assertEqual(re.findall(r"#[0-9A-Fa-f]{3,8}\b|rgba?\(|hsla?\(", body), [], selector)
+
+    def test_type_layers_and_motion_come_from_tokens(self):
+        # System fonts differ by OS, so the scale must hold wherever the face
+        # changes: every size, weight, line height and family is a token.
+        allowed = {"font-family": r"var\(--font-(sans|mono)\)|inherit",
+                   "font-size": r"var\(--(text-[a-z0-9]+|font-mono-scale)\)",
+                   "font-weight": r"var\(--weight-[a-z]+\)",
+                   "line-height": r"var\(--leading-[a-z]+\)",
+                   "z-index": r"var\(--z-[a-z]+\)",
+                   "transition-duration": r"0\.01ms !important"}
+        for selector, body in css_rules():
+            if selector.startswith(":root"):
+                continue
+            for prop, value in re.findall(r"(?<![a-z-])(font-family|font-size|font-weight|line-height|z-index|transition-duration)\s*:\s*([^;]+)", body):
+                self.assertRegex(value.strip(), rf"^({allowed[prop]})$", f"{selector} {{ {prop}: {value} }}")
+            for value in re.findall(r"(?<![a-z-])transition\s*:\s*([^;]+)", body):
+                self.assertNotRegex(value, r"\d+m?s", f"{selector}: a duration that is not a token")
+
+    def test_motion_is_short_and_moves_transform_and_opacity_only(self):
+        # P6: every keyframe moves transform and opacity only, every
+        # animation's duration and delay is a token, no fill leaves a
+        # transform behind, and the longest staggered entrance ends by 300 ms.
+        css = re.sub(r"/\*.*?\*/", "", (STATIC / "app.css").read_text(encoding="utf-8"), flags=re.S)
+        keyframes = re.findall(r"@keyframes\s+([a-z-]+)\s*\{((?:[^{}]*\{[^{}]*\})*)[^{}]*\}", css)
+        self.assertGreaterEqual(len(keyframes), 5)
+        for name, body in keyframes:
+            for prop in re.findall(r"([a-z-]+)\s*:", body):
+                self.assertIn(prop, ("transform", "opacity"), f"@keyframes {name} animates {prop}")
+        names = {name for name, _ in keyframes}
+        for selector, body in css_rules():
+            if selector.startswith(":root") or selector in ("from", "to"):
+                continue
+            for value in re.findall(r"(?<![a-z-])animation\s*:\s*([^;]+)", body):
+                self.assertNotRegex(value, r"(?<![a-z-])\d+m?s", f"{selector}: a duration that is not a token")
+                self.assertNotRegex(value, r"\b(both|forwards)\b", f"{selector}: a fill that leaves the end state behind")
+                self.assertIn(value.split()[0], names | {"none"}, selector)
+            for value in re.findall(r"(?<![a-z-])animation-delay\s*:\s*([^;]+)", body):
+                self.assertRegex(value.strip(), r"^(var\(--stagger\)|calc\(var\(--stagger\) \* [0-9]\)|0s !important)$", selector)
+        ms = {k: int(v) for k, v in re.findall(r"--(duration-[a-z]+|stagger):\s*(\d+)ms", css)}
+        self.assertTrue(all(v <= 300 for k, v in ms.items() if k.startswith("duration")), ms)
+        steps = max(int(n) for n in re.findall(r"calc\(var\(--stagger\) \* ([0-9])\)", css))
+        self.assertLessEqual(steps * ms["stagger"] + ms["duration-base"], 300)
+
+    def test_reduced_motion_turns_it_all_off(self):
         css = (STATIC / "app.css").read_text(encoding="utf-8")
-        root_end = css.index("}", css.index(":root"))
-        self.assertEqual(re.findall(r"#[0-9A-Fa-f]{3,8}\b|rgba?\(", css[root_end:]), [])
+        block = re.search(r"@media \(prefers-reduced-motion: reduce\) \{(.*?)\n\}", css, re.S).group(1)
+        for prop in ("transition-duration: 0.01ms !important", "animation-duration: 0.01ms !important", "animation-delay: 0s !important"):
+            self.assertIn(prop, block)
+        # Scripts ask before a smooth scroll.
+        for path in STATIC.glob("*.js"):
+            self.assertNotIn('behavior: "smooth"', path.read_text(encoding="utf-8"), path.name)
+
+    def test_media_queries_use_the_breakpoint_tokens(self):
+        css = (STATIC / "app.css").read_text(encoding="utf-8")
+        breakpoints = set(re.findall(r"--bp-[a-z]+:\s*(\d+px);", css))
+        widths = re.findall(r"@media \([a-z-]*width:\s*(\d+px)\)", css)
+        self.assertTrue(widths)
+        self.assertLessEqual(set(widths), breakpoints)
 
     def test_no_external_resource(self):
         # The page must open offline: no CDN script, stylesheet or font.
@@ -264,6 +347,10 @@ class CoreLogicTests(unittest.TestCase):
         self.assertEqual(node("input.map(Core.plain)", values),
                          ["—", "—", "active", "1,510", "0.5", "Yes", "None", "a, b",
                           "L1 · Modifier: — · Quantity: 2", "Status: approved\nMax quantity: 10"])
+
+    def test_every_chain_event_type_has_a_label(self):
+        # The audit page's type filter lists only the types Core.EVENT names.
+        self.assertEqual(set(node("Object.keys(Core.EVENT)", None)), set(EVENT_FIELDS))
 
     def test_explanation_labels_are_honest(self):
         labels = node("Object.fromEntries(Object.entries(Core.SOURCE).map(([k, v]) => [k, v.label]))", None)

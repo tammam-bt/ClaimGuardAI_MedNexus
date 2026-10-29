@@ -17,31 +17,50 @@ const CLAIM_BY_ID = new Map(CLAIMS.map((c) => [c.claim.claim_id, c]));
 const RULE_BY_ID = new Map(DATA.rules.map((r) => [r.rule_id, r]));
 
 // ---------------------------------------------------------------- storage
-// Per-viewer conveniences only (role, name, unsent decisions). It can be
+// Per-viewer conveniences only (role, name, theme, unsent decisions). It can be
 // empty or unavailable; the app works without it.
 const Store = {
   get(key, fallback) {
     try { const v = localStorage.getItem(`claimguard.${key}`); return v === null ? fallback : JSON.parse(v); }
     catch (e) { return fallback; }
   },
+  // True when the browser stored it (false: storage full, blocked or absent).
   set(key, value) {
-    try { localStorage.setItem(`claimguard.${key}`, JSON.stringify(value)); } catch (e) { /* unavailable */ }
+    try { localStorage.setItem(`claimguard.${key}`, JSON.stringify(value)); return true; } catch (e) { return false; }
   },
 };
 
 const State = {
   role: Store.get("role", "reviewer") === "admin" ? "admin" : "reviewer",
   reviewer: String(Store.get("reviewer", "") || ""),
+  theme: (() => { const t = Store.get("theme", "system"); return t === "light" || t === "dark" ? t : "system"; })(),
   drafts: (() => { const d = Store.get(`drafts.${RUN_ID}`, []); return Array.isArray(d) ? d : []; })(),
   listeners: [],
+  // Returns false when the drafts could not be stored in this browser.
   save() {
     Store.set("role", this.role);
     Store.set("reviewer", this.reviewer);
-    Store.set(`drafts.${RUN_ID}`, this.drafts);
+    Store.set("theme", this.theme);
+    const stored = Store.set(`drafts.${RUN_ID}`, this.drafts);
     this.listeners.forEach((fn) => fn());
+    return stored;
   },
   onChange(fn) { this.listeners.push(fn); },
 };
+
+// Theme: "system" follows the operating system (prefers-color-scheme);
+// "light" or "dark" is this viewer's choice, set as <html data-theme>.
+const THEMES = [["system", "Same as the system"], ["light", "Light"], ["dark", "Dark"]];
+function applyTheme() {
+  if (State.theme === "system") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = State.theme;
+}
+
+// Motion: short, and none at all for a viewer who asks for less
+// (prefers-reduced-motion). CSS turns its own animations off; scripts ask
+// here before a View Transition or a smooth scroll.
+function reducedMotion() { return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); }
+function scrollBehavior() { return reducedMotion() ? "auto" : "smooth"; }
 
 // Review decisions already in the audit chain, then this viewer's drafts.
 const RECORDED = DATA.audit
@@ -149,18 +168,21 @@ function linkButton(opts) {
 }
 
 // ------------------------------------------------------------------- cards
+// A card's title is an h2 under the page's h1, or an h3 (level: 3) on a
+// page that has its own h2 (a claim, a rule), so headings never skip a level.
 function card(opts) {
   const o = opts || {};
   return h("section", { class: "card", "aria-label": o.title || null },
     o.title ? h("div", { class: "card__head" },
-      h("h3", { class: "card__title", text: o.title }),
+      h(o.level === 3 ? "h3" : "h2", { class: "card__title", text: o.title }),
       o.meta ? h("span", { class: "card__meta" }, o.meta) : null,
       o.actions || null) : null,
     h("div", { class: `card__body${o.flush ? " card__body--flush" : ""}` }, o.body));
 }
 
-// Stat card: icon, label, value, and where the number comes from. Always the
-// same anatomy; no sparkline, because one run has no history to draw.
+// Stat card: icon, label, value, a caption, and the file the number comes
+// from (source). Always the same anatomy; no sparkline, because one run has
+// no history to draw.
 function statCard(opts) {
   const o = opts || {};
   const inner = [
@@ -168,7 +190,8 @@ function statCard(opts) {
     h("span", { class: "stat__body" },
       h("span", { class: "stat__label", text: o.label }),
       h("span", { class: "stat__value", text: o.value }),
-      o.caption ? h("span", { class: "stat__caption", text: o.caption }) : null),
+      o.caption ? h("span", { class: "stat__caption", text: o.caption }) : null,
+      o.source ? h("span", { class: "stat__source", text: `Source: ${o.source}` }) : null),
   ];
   return o.href ? h("a", { class: "card stat", href: o.href }, inner) : h("div", { class: "card stat" }, inner);
 }
@@ -216,11 +239,27 @@ function statusBars(counts) {
 
 // ------------------------------------------------------------------- table
 // columns: [{ key, label, num, sort: row => value, render: row => node }]
+// A row that opens something (rowHref: row => address, or onRowClick: row =>
+// action) carries it in its first cell, as a link or a button, so a screen
+// reader announces it; the whole row stays one target for the mouse. The
+// table is one tab stop: the arrow keys or j / k move between rows, Home and
+// End jump, Enter or Space opens. A long table draws pageSize rows (100 by
+// default) and a button for more. sort: { key, dir } to start sorted;
+// onOrder(rows, sort) hears every draw with all the rows in their order.
 function table(opts) {
   const o = opts;
   let sortKey = o.sort ? o.sort.key : null;
   let sortDir = o.sort ? o.sort.dir : 1;
-  const tbody = h("tbody");
+  const opens = !!(o.rowHref || o.onRowClick);
+  const pageSize = o.pageSize || 100;
+  let shown = pageSize;
+  let active = 0;   // the row whose link is the table's one tab stop
+  let links = [];
+  const tbody = h("tbody", { onKeydown: onKey, onFocusin: (e) => {
+    const i = links.indexOf(e.target);
+    if (i >= 0 && i !== active) { links[active].tabIndex = -1; active = i; e.target.tabIndex = 0; }
+  } });
+  const foot = h("div", { class: "table-foot" });
   const wrap = h("div", { class: "table-wrap" });
 
   function rows() {
@@ -231,28 +270,73 @@ function table(opts) {
       return (x < y ? -1 : x > y ? 1 : 0) * sortDir;
     });
   }
+  function opener(row, i, content) {
+    const props = { class: "row-link", tabindex: i === active ? "0" : "-1" };
+    return o.rowHref
+      ? h("a", Object.assign(props, { href: o.rowHref(row) }), content)
+      : h("button", Object.assign(props, { type: "button", onClick: () => o.onRowClick(row) }), content);
+  }
   function draw() {
-    tbody.replaceChildren(...rows().map((row) => {
-      const tr = h("tr", {
-        class: o.onRowClick ? "is-clickable" : null,
+    const all = rows();
+    const visible = all.slice(0, shown);
+    active = Math.min(active, visible.length - 1);
+    links = [];
+    tbody.replaceChildren(...visible.map((row, i) => {
+      const cells = o.columns.map((c, n) => {
+        const content = c.render ? c.render(row) : row[c.key];
+        return h("td", { class: c.num ? "num" : null }, opens && n === 0 ? opener(row, i, content) : content);
+      });
+      if (opens) links.push(cells[0].firstChild);
+      return h("tr", {
+        class: opens ? "is-clickable" : null,
         "aria-selected": o.selected && o.selected(row) ? "true" : null,
-        tabindex: o.onRowClick ? "0" : null,
-        onClick: o.onRowClick ? () => o.onRowClick(row) : null,
-        onKeydown: o.onRowClick ? (e) => { if (e.key === "Enter") o.onRowClick(row); } : null,
-      }, o.columns.map((c) => h("td", { class: c.num ? "num" : null }, c.render ? c.render(row) : row[c.key])));
-      return tr;
+        // A click anywhere on the row opens it, except on a control of its own.
+        onClick: opens ? (e) => { if (!e.target.closest("a, button, input, select, textarea, summary")) links[i].click(); } : null,
+      }, cells);
     }));
     head.querySelectorAll("th").forEach((th) => {
       th.setAttribute("aria-sort", th.dataset.key === sortKey ? (sortDir === 1 ? "ascending" : "descending") : "none");
     });
+    const more = all.length - visible.length;
+    fill(foot,
+      opens && visible.length > 1 ? h("span", { text: "↑ ↓ or j / k to move · Enter to open" }) : null,
+      more > 0 ? h("span", { class: "row" }, `Showing ${Core.number(visible.length)} of ${Core.number(all.length)}`,
+        button({ label: `Show ${Core.number(Math.min(more, pageSize))} more`, onClick: () => {
+          const first = shown;
+          shown += pageSize;
+          draw();
+          // The keyboard carries on from the first new row.
+          if (links[first]) focusRow(first);
+        } })) : null);
+    foot.hidden = !foot.firstChild;
+    if (o.onOrder) o.onOrder(all, sortKey ? { key: sortKey, dir: sortDir } : null);
+  }
+  function focusRow(i) {
+    links[active].tabIndex = -1;
+    active = i;
+    links[i].tabIndex = 0;
+    links[i].focus();
+  }
+  function onKey(e) {
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    const i = links.indexOf(e.target);
+    if (i < 0) return;
+    if (e.key === " ") { e.preventDefault(); e.target.click(); return; }
+    const to = { ArrowDown: i + 1, j: i + 1, ArrowUp: i - 1, k: i - 1, Home: 0, End: links.length - 1 }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    focusRow(Math.max(0, Math.min(links.length - 1, to)));
   }
   const head = h("thead", {}, h("tr", {}, o.columns.map((c) => h("th", { class: c.num ? "num" : null, "data-key": c.key, scope: "col" },
-    c.sort ? h("button", { type: "button", onClick: () => { sortDir = sortKey === c.key ? -sortDir : 1; sortKey = c.key; draw(); } },
+    c.sort ? h("button", { type: "button", onClick: () => { sortDir = sortKey === c.key ? -sortDir : 1; sortKey = c.key; active = 0; draw(); } },
       c.label, icon("sort", { size: "sm" })) : c.label))));
-  if (!o.rows.length) return o.empty || emptyState({ icon: "search", title: "Nothing to show", text: "No row matches." });
+  if (!o.rows.length) {
+    if (o.onOrder) o.onOrder([], null);
+    return o.empty || emptyState({ icon: "search", title: "Nothing to show", text: "No row matches." });
+  }
   wrap.appendChild(h("table", { class: "table" }, h("caption", { class: "sr-only", text: o.caption || "" }), head, tbody));
   draw();
-  return wrap;
+  return h("div", {}, wrap, foot);
 }
 
 // --------------------------------------------------------------- filters
@@ -273,15 +357,28 @@ function searchField(opts) {
 
 // ------------------------------------------------------------------ tabs
 // tabs: [{ key, label, count, render }]; the active tab is kept per name.
+// One tab stop: the arrow keys, Home and End move between the tabs and
+// open the one they reach; the panel is named by its tab.
 function tabs(name, list, initial) {
-  const panel = h("div", { role: "tabpanel" });
+  const id = (t) => `tab-${name}-${t.key}`;
+  const panel = h("div", { role: "tabpanel", id: `tabpanel-${name}`, tabindex: "0" });
   let active = list.some((t) => t.key === initial) ? initial : list[0].key;
-  const bar = h("div", { class: "tabs", role: "tablist" });
+  const bar = h("div", { class: "tabs", role: "tablist", onKeydown: (e) => {
+    const i = list.findIndex((t) => t.key === active);
+    const to = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: list.length - 1 }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    active = list[(to + list.length) % list.length].key;
+    draw();
+    document.getElementById(id(list.find((t) => t.key === active))).focus();
+  } });
   function draw() {
     bar.replaceChildren(...list.map((t) => h("button", {
-      type: "button", class: "tab", role: "tab", "aria-selected": String(t.key === active),
+      type: "button", class: "tab", role: "tab", id: id(t), "aria-selected": String(t.key === active),
+      "aria-controls": `tabpanel-${name}`, tabindex: t.key === active ? "0" : "-1",
       onClick: () => { active = t.key; draw(); },
     }, t.label, t.count !== undefined ? h("span", { class: "tab__count", text: Core.number(t.count) }) : null)));
+    panel.setAttribute("aria-labelledby", id(list.find((t) => t.key === active)));
     panel.replaceChildren(list.find((t) => t.key === active).render());
   }
   draw();
@@ -344,7 +441,7 @@ function checkGrid(results, opts) {
 // claim names lines and documents by their own IDs), and its value as plain
 // text. A list or an object is source text: it stays boxed as data.
 function evidenceTable(evidence, claim) {
-  return h("table", { class: "evidence" },
+  return h("table", { class: "evidence", "aria-label": "Evidence the engine cited" },
     h("thead", {}, h("tr", {}, h("th", { scope: "col", text: "Field" }), h("th", { scope: "col", text: "Value" }))),
     h("tbody", {}, evidence.map((e) => h("tr", {}, h("td", { text: Core.fieldLabel(e.path, claim) }),
       h("td", {}, e.value !== null && typeof e.value === "object"
@@ -368,6 +465,153 @@ function lifecycleStrip(stages, opts) {
     return h("li", {}, o.onPick
       ? h("button", { type: "button", class: cls, style: { width: "100%" }, onClick: () => o.onPick(s) }, inner)
       : h("div", { class: cls }, inner));
+  }));
+}
+
+// ------------------------------------------------- signature components
+// The check fingerprint: a claim's 15 checks as 15 cells, in rule order.
+// Each status has its own shape as well as its color (a solid block, a
+// hatched block, a dashed or hollow outline, a low bar), so it reads in
+// grey too. One label sums it up for a screen reader; each cell names its
+// rule on hover. size: "sm" (queue rows) or "md" (claim header).
+const FINGERPRINT_SHAPE = { PASS: "pass", FAIL: "fail", UNABLE_TO_ASSESS: "unable", NOT_APPLICABLE: "na", NOT_IMPLEMENTED: "ni" };
+function fingerprintLabel(results) {
+  const parts = Core.STATUS_ORDER.map((s) => {
+    const hits = results.filter((r) => r.status === s);
+    if (!hits.length) return null;
+    const ids = s === "PASS" || s === "NOT_APPLICABLE" ? "" : ` (${hits.map((r) => r.rule_id).join(", ")})`;
+    return `${hits.length} ${Core.STATUS[s].label.toLowerCase()}${ids}`;
+  }).filter(Boolean);
+  return `${Core.plural(results.length, "check")}: ${parts.join(", ")}`;
+}
+function fingerprint(results, opts) {
+  const o = opts || {};
+  return h("span", { class: `fingerprint fingerprint--${o.size || "md"}`, role: "img", "aria-label": fingerprintLabel(results) },
+    results.map((r) => h("span", { class: `fp-cell is-${FINGERPRINT_SHAPE[r.status] || "na"}`,
+      title: `${r.rule_id} ${ruleName(r.rule_id)}: ${(Core.STATUS[r.status] || { label: r.status }).label}` })));
+}
+
+// One piece of evidence as a chip: the field, named for a reviewer, and the
+// value the engine cited. With onShow it is a toggle ("show in claim"),
+// pressed while its field is highlighted; that is the evidence thread.
+function evidenceChip(e, claim, opts) {
+  const o = opts || {};
+  const missing = e.value === null || e.value === undefined || e.value === "";
+  const structured = !missing && typeof e.value === "object";
+  const shown = missing ? "missing" : structured ? (Array.isArray(e.value) ? `list of ${e.value.length}` : "structured value") : Core.plain(e.value);
+  const inner = [h("span", { class: "chip__field", text: Core.fieldLabel(e.path, claim) }),
+    h("span", { class: `chip__value${missing ? " is-missing" : ""}`, text: shown })];
+  const cls = `chip${missing ? " chip--missing" : ""}`;
+  return o.onShow
+    ? h("button", { type: "button", class: cls, "aria-pressed": String(!!o.active), title: "Show in claim", onClick: () => o.onShow(e) }, inner)
+    : h("span", { class: cls }, inner);
+}
+
+// A finding in three labelled layers: what the claim says (the cited
+// fields), why it matters (rule text or AI, labelled), and the reviewer's
+// decision. opts: { result, claimLayer, explanationLayer, decisionLayer,
+// selected }.
+function findingBlock(opts) {
+  const r = opts.result;
+  const s = Core.STATUS[r.status] || Core.STATUS.NOT_APPLICABLE;
+  const layer = (n, label, glyph, body) => h("section", { class: "layer", "aria-label": label },
+    h("div", { class: "layer__head" }, h("span", { class: "layer__mark", "aria-hidden": "true" }, icon(glyph, { size: "sm" })),
+      h("span", { class: "label", text: `${n}. ${label}` })),
+    h("div", { class: "layer__body" }, body));
+  return h("article", { class: `finding-block is-${s.tone}${opts.selected ? " is-selected" : ""}`, "aria-label": `${r.rule_id} ${ruleName(r.rule_id)}` },
+    h("div", { class: "finding-block__head" },
+      h("span", { class: "mono", text: r.rule_id }), h("span", { class: "finding-block__title", text: ruleName(r.rule_id) }),
+      statusBadge(r.status), severityBadge(r.severity, { long: true }),
+      (r.affected_line_ids || []).length ? badge(`Line ${r.affected_line_ids.join(", ")}`, { tone: "neutral" }) : null),
+    layer(1, "From the claim", "file-text", opts.claimLayer),
+    layer(2, "Explanation", "scroll", opts.explanationLayer),
+    layer(3, "Your decision", "user", opts.decisionLayer));
+}
+
+// The reviewer's decision on one finding: the four actions, a reason
+// (required), and Save. It updates itself as the reviewer works, so focus
+// never jumps; the caller hears each change and redraws only after a save.
+// opts: { id, action, reason, reviewer, allowed(action), notImplemented,
+// draft, recorded, error, confirming, onAction, onReason, onName,
+// onSave({ action, reason }), onDiscard }. Your name comes just before Save
+// when it is missing, so the keyboard meets it on the way. Dismiss settles
+// a finding, so it asks once more before saving.
+function decisionPanel(opts) {
+  const o = opts;
+  const st = { action: o.action || null, reason: o.reason || "", name: String(o.reviewer || ""), confirming: !!o.confirming };
+  const reasonId = `reason-${o.id}`, hintId = `reason-hint-${o.id}`;
+  const ready = () => !!st.action && st.reason.trim() !== "" && st.name.trim() !== "" && o.allowed(st.action);
+  const settles = () => st.action === "dismiss_with_reason";
+
+  const actions = Core.ACTION_ORDER.map((a) => button({ label: Core.ACTION[a].label, icon: Core.ACTION[a].icon, title: Core.ACTION[a].help,
+    pressed: st.action === a, disabled: !o.allowed(a) || (o.notImplemented && a === "dismiss_with_reason"),
+    onClick: () => { st.action = st.action === a ? null : a; st.confirming = false; if (o.onAction) o.onAction(st.action); update(); } }));
+  const help = h("p", { class: "muted small" });
+  const reason = h("textarea", { id: reasonId, class: `textarea${o.error ? " textarea--invalid" : ""}`, rows: "2",
+    placeholder: "Why? Kept with your name in this browser's draft.", "aria-describedby": hintId, required: true,
+    onInput: (e) => { st.reason = e.target.value; if (o.onReason) o.onReason(st.reason); update(); } });
+  reason.value = st.reason;
+  const nameField = st.name.trim() || !o.onName ? null : (() => {
+    const input = h("input", { id: `name-${o.id}`, class: "input", autocomplete: "name", placeholder: "e.g. Reviewer 01",
+      onInput: (e) => { st.name = e.target.value; o.onName(st.name); update(); } });
+    return h("label", { class: "field", for: `name-${o.id}` }, "Your name (needed to save)", input);
+  })();
+
+  const save = button({ label: o.draft ? "Replace the draft" : "Save draft", variant: "primary", onClick: () => {
+    if (!ready()) return;
+    if (settles() && !st.confirming) { st.confirming = true; update(); yes.focus(); return; }
+    o.onSave({ action: st.action, reason: st.reason });
+  } });
+  const why = h("span", { class: "muted small" });
+  const saveRow = h("div", { class: "row decision-panel__save" }, nameField, save, why);
+  const yes = button({ label: "Yes, dismiss", variant: "primary", icon: "ban", onClick: () => { if (ready()) o.onSave({ action: st.action, reason: st.reason }); } });
+  const back = button({ label: "Go back", variant: "ghost", onClick: () => { st.confirming = false; update(); save.focus(); } });
+  const confirm = callout({ tone: "unknown", icon: "ban", role: "group", title: "Dismiss settles this finding",
+    text: "If every finding of the claim is settled, it becomes ready for submission. It stays a draft until an administrator appends it.",
+    body: h("div", { class: "row" }, yes, back) });
+
+  function update() {
+    actions.forEach((b, i) => b.setAttribute("aria-pressed", String(st.action === Core.ACTION_ORDER[i])));
+    help.textContent = st.action ? Core.ACTION[st.action].help : "";
+    help.hidden = !st.action;
+    save.disabled = !ready();
+    why.textContent = !st.action ? "Choose an action first." : !st.reason.trim() ? "Write the reason first."
+      : !st.name.trim() ? "Enter your name first." : "";
+    confirm.hidden = !st.confirming;
+    saveRow.hidden = st.confirming;
+  }
+
+  const panel = h("div", { class: "decision-panel" },
+    o.recorded ? callout({ tone: "info", icon: "history", title: "In the audit log",
+      text: `${Core.ACTION[o.recorded.action].label} by ${o.recorded.actor}, ${Core.datetime(o.recorded.created_at)}: ${o.recorded.reason}` }) : null,
+    o.draft ? callout({ tone: "pass", icon: Core.ACTION[o.draft.action].icon, title: "Draft saved in this browser, not yet in the audit log",
+      text: `${Core.ACTION[o.draft.action].label} by ${o.draft.actor}: ${o.draft.reason}`,
+      body: o.onDiscard ? h("div", { class: "row" }, button({ label: "Discard this draft", variant: "ghost", icon: "ban", onClick: o.onDiscard })) : null }) : null,
+    o.notImplemented ? callout({ tone: "neutral", icon: "circle-dashed", title: "This check did not run",
+      text: "It cannot be dismissed (routing policy): only an implementation can settle it." }) : null,
+    h("div", { class: "decision-panel__actions", role: "group", "aria-label": "Review action" }, actions),
+    help,
+    h("label", { class: "field", for: reasonId }, h("span", {}, "Reason (required) ",
+      h("span", { id: hintId, class: "muted", text: "· saved as a draft in this browser; an administrator adds drafts to the audit log" })), reason),
+    o.error ? callout({ tone: "fail", icon: "alert-triangle", role: "alert", title: "Not stored", text: o.error }) : null,
+    saveRow, confirm);
+  update();
+  return panel;
+}
+
+// A claim's history, oldest first. A logged event (in the audit chain) and
+// a draft (only in this browser) never look alike: a solid mark against a
+// dashed one, and the draft says so in words.
+// items: [{ kind: "logged" | "draft", badge, meta, text, onOpen }]
+function timeline(items, opts) {
+  const o = opts || {};
+  return h("ol", { class: "timeline", "aria-label": o.label || "History" }, items.map((it) => {
+    const body = [h("span", { class: "row row--tight" }, it.badge,
+      it.kind === "draft" ? badge("Draft, not in the audit log", { tone: "neutral" }) : null,
+      it.meta ? h("span", { class: "muted small", text: it.meta }) : null),
+    h("span", { class: "small", text: it.text })];
+    return h("li", { class: `timeline__item is-${it.kind}` }, h("span", { class: "timeline__mark", "aria-hidden": "true" }),
+      it.onOpen ? h("button", { type: "button", class: "timeline__body", onClick: it.onOpen }, body) : h("div", { class: "timeline__body" }, body));
   }));
 }
 
@@ -416,11 +660,17 @@ function explainerLine() {
 }
 
 // ----------------------------------------------------------- audit events
-// Run events (runs, rejections, flags, model failures) need the
-// view_run_events permission (claimguard.guards.rbac): admins only. Review
-// decisions and new versions are visible to every role.
-const RUN_EVENT_TYPES = ["run_started", "run_finished", "ingestion_error", "injection_flag", "model_failure"];
+// Run events (runs, rejections, flags, model failures, and who ran each
+// append) need the view_run_events permission (claimguard.guards.rbac):
+// admins only. append_performed holds an OS user name, personal data the
+// chain can never erase. Review decisions and new versions are visible to
+// every role.
+const RUN_EVENT_TYPES = ["run_started", "run_finished", "ingestion_error", "injection_flag", "model_failure",
+  "append_performed"];
 function canSeeEvent(e) { return !RUN_EVENT_TYPES.includes(e.event) || can("view_run_events"); }
+// The command that appended a batch, in words (claimguard/audit/chain.py).
+const APPENDED_BY = { "claimguard.run": "Run", "claimguard.ui.decisions": "Decisions", "claimguard.ui.apply": "Decisions",
+  "claimguard.review.correct": "Correction" };
 function eventBadge(e) {
   const t = Core.EVENT[e.event] || { label: String(e.event), icon: "info", tone: "neutral" };
   return badge(t.label, { tone: t.tone, icon: t.icon });
@@ -441,6 +691,8 @@ function eventSummary(e) {
       return `${e.rule_id} · ${(Core.ACTION[e.action] || { label: e.action }).label} by ${e.actor}: ${e.reason}`;
     case "version_created":
       return `v${e.version} by ${e.actor}: ${Core.plural((e.changes || []).length, "change")} · ${e.reason}`;
+    case "append_performed":
+      return `${APPENDED_BY[e.command] || e.command}: ${Core.plural(e.events, "event")} appended by OS user ${e.os_user} · input ${Core.shortHash(e.input_sha256)}`;
     default: return "";
   }
 }
@@ -459,13 +711,24 @@ function recordedFor(entry, ruleId) {
   const mine = RECORDED.filter((e) => sameFinding(e, entry.route.claim_id, ruleId, Core.current(entry).input_hash));
   return mine.length ? mine[mine.length - 1] : null;
 }
+// False when this browser would not store it: it is then kept on this page
+// only, until a reload, and the caller says so.
 function saveDraft(event) {
   State.drafts = State.drafts.filter((d) => !sameFinding(d, event.claim_id, event.rule_id, event.input_hash)).concat([event]);
-  State.save();
+  return State.save();
 }
 function discardDraft(entry, ruleId) {
   State.drafts = State.drafts.filter((d) => !sameFinding(d, entry.route.claim_id, ruleId, Core.current(entry).input_hash));
   State.save();
+}
+// Drafts in this browser, never presented as logged (M6). Downloading them
+// is an export, so it is a secondary action here.
+function draftsBanner() {
+  const n = State.drafts.length;
+  if (!n) return null;
+  return callout({ tone: "info", icon: "user", title: `${Core.plural(n, "draft")} in this browser`,
+    text: "Not in the audit log until an administrator appends them.",
+    body: h("div", { class: "row" }, button({ label: `Download decisions (${n})`, icon: "download", onClick: downloadDecisions })) });
 }
 function downloadDecisions() {
   download(`review_decisions_${RUN_ID.slice(0, 8)}.jsonl`, State.drafts.map((d) => JSON.stringify(d)).join("\n") + "\n");
@@ -494,13 +757,16 @@ function download(filename, text) {
 const PAGES = [];
 function registerPage(page) { PAGES.push(page); }
 
+// The page an address without a page opens: the Review Queue for a
+// reviewer, the dashboard for an administrator.
+function homePage() { return State.role === "admin" ? "dashboard" : "queue"; }
 function parseRoute() {
-  const raw = (location.hash || "#/dashboard").replace(/^#\/?/, "");
+  const raw = (location.hash || `#/${homePage()}`).replace(/^#\/?/, "");
   const [path, query] = raw.split("?");
   const parts = path.split("/").map(decodeURIComponent);
   const params = {};
   new URLSearchParams(query || "").forEach((v, k) => { params[k] = v; });
-  return { key: parts[0] || "dashboard", id: parts[1] || null, params };
+  return { key: parts[0] || homePage(), id: parts[1] || null, params };
 }
 function href(key, id, params) {
   const q = params ? new URLSearchParams(Object.entries(params).filter(([, v]) => v !== "" && v !== null && v !== undefined)).toString() : "";

@@ -74,12 +74,12 @@ const AuditPage = (function () {
       ]),
       audit.valid
         ? callout({ tone: "pass", icon: "lock", title: "Chain verified when this page was built",
-          text: `Every event links to the one before it by SHA-256, and ${audit.anchored ? "the anchored head matches, so no event was removed or rewritten" : "there is no anchor file, so removing events from the end would not be detected"}. Tamper-evident, not immutable: whoever controls both the log and its anchor can rewrite both.` })
+          text: `Every event links to the one before it by SHA-256, and ${audit.anchored ? "the anchored head matches, so no event was removed or rewritten" : "there is no anchor file, so removing events from the end would not be detected"}. Tamper-evident, not immutable: whoever controls both the log and its anchor can rewrite both. Reviewer names are self-declared; the log records who appended them.` })
         : callout({ tone: "fail", icon: "alert-triangle", title: "Chain INVALID", role: "alert",
           text: `${audit.error}. Do not trust these events until the log is restored from a trusted copy.` }),
       can("view_run_events") ? null : callout({ tone: "neutral", icon: "user",
         title: `${Core.plural(rows.length - visible.length, "run event")} hidden for your role`,
-        text: "Runs, rejections, injection flags and model failures are shown to admins. Switch “View as” to Admin to see them. This is a demonstration without login, not a security control." }),
+        text: "Runs, rejections, injection flags, model failures and who ran each append are shown to admins. Switch “Demo: view as” to Admin to see them. This is a demonstration without login, not a security control." }),
       card({ title: "Events", meta: h("span", { class: "mono small", text: audit.log }), flush: true,
         body: h("div", {}, h("div", { class: "card__body" }, filters), holder) }));
   }

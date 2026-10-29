@@ -26,15 +26,17 @@ Every page has the same sidebar, top bar and components. A concept (a status, a 
 
 | Page | What it shows |
 |---|---|
-| **Dashboard** | The run's life cycle in eight steps (received → ingested → checked → screened → explained → routed → in review → outcome), routes, result statuses, the rules most often failing, latest audit events, records rejected at ingestion |
-| **Review Queue** | Claims routed REVIEW or ESCALATE, open ones first, most urgent route then oldest first, with the routing rules explained |
-| **Claims** | Every claim; one claim's life cycle, its 15 checks, each finding's evidence (field and value), explanation, corrective action and the reviewer's decision, its documents, history and corrected versions |
+| **Dashboard** | An administrator's home. The run's life cycle in eight steps (received → ingested → checked → screened → explained → routed → in review → outcome), where the review stands, routes, the rules most often failing, your drafts, the audit log, records rejected at ingestion. Every number opens the list it counts; every card names its source (run manifest, results, audit log, this browser) |
+| **Review Queue** | A reviewer's home. The next claim with a finding to decide, then the claims routed REVIEW or ESCALATE, open ones first, most urgent route then oldest first, each with its 15-check fingerprint. Filters and sort live in the address |
+| **Claims** | Every claim. One claim is a review workspace: its findings, the finding being decided in three layers (from the claim, explanation, your decision) and the claim's data, where "show in claim" highlights each field a finding cites. Then its life cycle, 15 checks, history and corrected versions. When the last finding is decided, the next open claim is one key away |
 | **Audit Logs** | The hash chain, verified when the page was built; run events are shown to admins only |
 | **Rules** | The 15 rules of `rules/rules.json`: logic quoted from the rulebook, the policy values each one reads, this run's statuses, performance, the claims concerned. Read-only |
 | **Evaluation** | The official scorer's metrics: overall, per rule, expected-against-predicted matrix, disagreements, AI summary |
 | **Settings** | The reviewer's name, role and unsent drafts; how findings are explained, routing, security and permissions, read-only |
 
 `#/components` (not linked from any page) shows every component in every state.
+
+A reviewer's sidebar lists Review Queue, Claims, Rules and Settings, with the other pages under "More"; an administrator's lists all seven. This is a convenience, not access control. Every list is one tab stop (↑ ↓ or j / k, Enter); below 1100 px the sidebar is a drawer behind a menu button, and below 768 px the page is one column. `docs/DESIGN_SYSTEM.md` has the details.
 
 The page speaks a claims reviewer's language: it shows no command, file path of the run, hash or version tag, and no document citation. Run details (run ID, input hash, versions) stay in the run's manifest; the commands below live here, not in the page.
 
@@ -49,8 +51,22 @@ The page speaks a claims reviewer's language: it shows no command, file path of 
        --directory actors.json --results outputs/dev_predictions.jsonl --claims data/development/claims.jsonl
    ```
 
-   Every decision is checked first: the event format, the role (`claimguard.guards.rbac`), the date, that it was taken on this version of the claim, on a finding of this run, at its current status. One bad decision writes nothing. Appending the same file twice adds nothing. `--directory` is required: it maps each name to a role, in the format of `actors.example.json`. A name that is not in it records nothing, and neither does a role that is not `reviewer` or `admin`.
+   Every decision is checked first: the event format, the role (`claimguard.guards.rbac`), the date, that it was taken on this version of the claim, on a finding of this run, at its current status. One bad decision writes nothing. Appending the same file twice adds nothing. `--directory` is required: it maps each name to a role, in the format of `actors.example.json`. A name that is not in it records nothing, and neither does a role that is not `reviewer` or `admin`. The command ends by printing the log's count and head: record them outside this machine (see *The gate*).
 4. Rebuild the page: the decisions now count in every stage, counter and history.
+
+**In one step.** `python -m claimguard.ui.apply` appends, runs the gate and rebuilds the page, with the same checks and the same result as `decisions`, `gate` and `claimguard.ui` run in order:
+
+```bash
+python -m claimguard.ui.apply --decisions review_decisions_<run>.jsonl --log outputs/audit.jsonl \
+    --directory actors.json --results outputs/dev_predictions.jsonl --claims data/development/claims.jsonl \
+    [--corrections outputs/corrections] [--gold data/development/expected_results.jsonl] \
+    [--expect-count N --expect-head HASH]
+```
+
+- With `--expect-count` and `--expect-head`, the log is checked against the head recorded outside this machine before anything is appended.
+- It prints how many decisions were appended, the gate's verdict and the page's path, and ends with the count and head to record outside.
+- Exit 0 when every claim is ready, 1 while any is blocked, as the gate does. 2 when it stopped without rebuilding the page: a decision was refused (nothing is appended), or the chain or the run's files cannot be trusted.
+- The audit log's `append_performed` event names `claimguard.ui.apply` as the command.
 
 A finding is settled only by **Dismiss with reason**. A check that did not run can never be dismissed.
 
@@ -84,7 +100,8 @@ python -m claimguard.review.gate --results outputs/dev_predictions.jsonl --claim
     --log outputs/audit.jsonl --directory actors.json --corrections outputs/corrections --output outputs/gate.jsonl
 ```
 
-- It verifies the audit chain first; a chain that does not verify judges nothing (exit 2).
+- It verifies the audit chain first; a chain that does not verify judges nothing (exit 2). That includes a log with events and no anchor file.
+- With `--expect-count N --expect-head HASH`, a count and head recorded outside this machine, it also checks that event N still has that head, and exits 2 if not. It ends by printing the current count and head to record. See `docs/PRIVACY_SECURITY.md` for where the team keeps them and how to restore a lost anchor.
 - Each claim is judged on its latest version. It is **ready** when nothing is flagged, or when every flagged finding was dismissed with a reason, by an actor the directory allows, on that version and that status.
 - Otherwise it is **blocked**, in the page's own words: to review, in review, correction needed, waiting for information, awaiting recheck, or rechecked. A claim ingestion rejected, or one with no results, is blocked too.
 - It exits 0 only when every claim is ready, so a submission step can rely on it. With no decisions, development gives 136 ready and 264 blocked, as the dashboard shows.
@@ -129,6 +146,7 @@ The Node and Chrome tests are skipped where Node or Chrome is not installed.
 | `claimguard/ui/bundle.py` | gathers the run's files, computes routes, verifies the chain, scores against the gold |
 | `claimguard/ui/page.py` | inlines CSS, icons, data and scripts into one HTML file |
 | `claimguard/ui/decisions.py` | appends downloaded decisions to the chain, after checking them |
+| `claimguard/ui/apply.py` | one step: `decisions`, then the gate, then the page rebuilt |
 | `claimguard/review/correct.py` | correction → new version → recheck → `version_created` |
 | `claimguard/review/gate.py` | the gate: ready or blocked per claim, exit code; `outcome()` is the twin of `Core.outcome` |
 | `claimguard/review/feedback.py` | decisions summarized from the audit chain |

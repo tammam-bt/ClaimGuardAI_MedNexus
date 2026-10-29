@@ -91,6 +91,18 @@ class BundleTests(RunCase):
         self.assertFalse(audit["valid"])
         self.assertIn("invalid", audit["error"])
 
+    def test_a_malformed_anchor_shows_as_invalid(self):
+        # M4: invalid JSON or a missing head crashed the build instead.
+        log = self.tmp / "malformed.jsonl"
+        log.write_bytes(self.audit.read_bytes())
+        anchor = self.tmp / "malformed.head.json"
+        for text in ('{"count": 3', '{"count": 3}'):
+            anchor.write_text(text, encoding="utf-8")
+            audit = build(self.results, STRESS / "claims.jsonl", audit_log=log)["audit"]
+            with self.subTest(text):
+                self.assertFalse(audit["valid"])
+                self.assertIn("the anchor", audit["error"])
+
     def test_missing_sources_are_null_not_invented(self):
         bare = self.tmp / "bare.jsonl"
         bare.write_bytes(self.results.read_bytes())  # no manifest, explanations, audit or gold beside it

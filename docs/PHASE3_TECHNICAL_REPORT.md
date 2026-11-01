@@ -4,7 +4,7 @@
 **Project:** ClaimGuard AI — synthetic healthcare-claim pre-validation and human review  
 **Report date:** 1 November 2026  
 **Repository:** [tammam-bt/ClaimGuardAI_MedNexus](https://github.com/tammam-bt/ClaimGuardAI_MedNexus)  
-**Current repository revision:** `932f59d`  
+**Test results recorded at revision:** `932f59d` (rerun before submission, see section 10)  
 **Data classification:** Synthetic educational data only
 
 > This report describes the implementation in this repository. It does not claim
@@ -132,14 +132,15 @@ is the final interactive mockup:
 +-------------------+------------------------------------------------------+
 | ClaimGuard AI     | Dashboard             Search claim/rule    Role     |
 |                   +------------------------------------------------------+
-| Dashboard         | Run lifecycle: received -> checked -> routed -> review|
-| Review Queue      +--------------------+------------------+--------------+
-| Claims            | Routing outcomes   | Review progress  | Drafts       |
+| Dashboard         | Four headline counts                                 |
+| Review Queue      +------------------------------------------------------+
+| Claims            | Run life cycle: received -> checked -> routed -> ... |
 | Audit Logs        +--------------------+------------------+--------------+
-| Rules             | Rule outcome profile                | Audit status |
-| Evaluation        +------------------------------------------------------+
-| Settings          | Claims by route and other run summaries             |
-+-------------------+------------------------------------------------------+
+| Rules             | Routing outcomes   | Review progress  | Your drafts  |
+| Evaluation        +--------------------+------------------+              |
+| Settings          | Rule outcomes profile                 | Audit log    |
+|                   | Rules most often failing or unassessed|              |
++-------------------+---------------------------------------+--------------+
 ```
 
 The claim review workspace presents findings, their rule-linked evidence,

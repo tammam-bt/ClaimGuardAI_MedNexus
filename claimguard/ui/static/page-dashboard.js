@@ -4,11 +4,6 @@
 // file it comes from: the run manifest, the results (and the routes computed
 // from them), the audit log, or the drafts in this browser. Nothing here is
 // a trend, a turnaround or a workload: one run has no data for them.
-//
-// Motion (see dashboard-motion.css): cards rise from the bottom one after
-// another, the counters count up slowly and pop at the end, the donut and the
-// area chart draw themselves, the status columns grow. All numbers still come
-// from DATA, CLAIMS and Core: nothing is hard coded.
 
 const Dashboard = (function () {
   // Where a number comes from, in the words each card uses.
@@ -31,7 +26,7 @@ const Dashboard = (function () {
       }
     }
     return Array.from(byRule.values()).filter((x) => x.fail || x.unable)
-      .sort((a, b) => (b.fail + b.unable) - (a.fail + a.unable)).slice(0, 8);
+      .sort((a, b) => (b.fail + b.unable) - (a.fail + a.unable));
   }
 
   function ruleTable(rows) {
@@ -51,7 +46,6 @@ const Dashboard = (function () {
   function routeCard(f) {
     const total = CLAIMS.length;
     const radius = 68;
-    const circumference = 2 * Math.PI * radius;
     const routed = (f.routes.ESCALATE || 0) + (f.routes.REVIEW || 0);
     const value = h("strong", { class: "dashboard-route__value", id: "dashboard-route-value", text: Core.number(routed) });
     const label = h("span", { class: "dashboard-route__label", id: "dashboard-route-label", text: "Routed for review" });
@@ -84,6 +78,7 @@ const Dashboard = (function () {
       const link = svg("a", {
         class: `dashboard-donut__link dashboard-donut__link--${item.key.toLowerCase()}`,
         href: href("claims", null, { route: item.key }),
+        tabindex: -1, // the legend beside it holds the same links for the keyboard
         "aria-label": `${item.route.label}: ${Core.number(item.value)} claims`,
       }, svg("path", {
         class: "dashboard-donut__segment",
@@ -145,83 +140,29 @@ const Dashboard = (function () {
         legend) });
   }
 
-  // A smooth curve through the points (horizontal tangents at each point).
-  function smoothPath(points) {
-    return points.reduce((d, [px, py], index) => {
-      if (!index) return `M${px},${py}`;
-      const [ox, oy] = points[index - 1];
-      const mid = (px - ox) / 2;
-      return `${d} C${ox + mid},${oy} ${px - mid},${py} ${px},${py}`;
-    }, "");
-  }
-
-  // Area chart: failed and unable-to-assess results, rule by rule. Each series
-  // is a smooth curve that draws itself, then its area fades in below it.
+  // Grouped bars: failed and unable-to-assess results for every rule that has
+  // any, in rule order. Rules are categories, so nothing joins one to the next.
   function ruleProfile(rows) {
     if (!rows.length) return emptyState({ icon: "check-check", title: "No rule failed",
       text: "Every check passed or did not apply, so no claim needs a review." });
     const ordered = [...rows].sort((a, b) => a.rule.rule_id.localeCompare(b.rule.rule_id));
-    const width = 620, height = 228;
-    const pad = { left: 36, right: 12, top: 16, bottom: 34 };
     const max = Math.max(1, ...ordered.map((row) => Math.max(row.fail, row.unable)));
-    const x = (index) => ordered.length === 1
-      ? (width + pad.left - pad.right) / 2
-      : pad.left + index * (width - pad.left - pad.right) / (ordered.length - 1);
-    const y = (value) => pad.top + (1 - value / max) * (height - pad.top - pad.bottom);
-    const base = y(0);
-    const series = [["fail", "failed"], ["unable", "unable to assess"]];
-    const chart = svg("svg", {
-      class: "dashboard-profile",
-      viewBox: `0 0 ${width} ${height}`,
-      role: "group",
-      "aria-label": "Failed and unable-to-assess results by rule. Select a point to filter claims.",
-    });
-    chart.append(svg("defs", {}, ...series.map(([key]) => svg("linearGradient",
-      { id: `dashboard-area-${key}`, x1: 0, y1: 0, x2: 0, y2: 1 },
-      svg("stop", { class: `dashboard-area__stop dashboard-area__stop--${key} dashboard-area__stop--top`, offset: "0" }),
-      svg("stop", { class: `dashboard-area__stop dashboard-area__stop--${key} dashboard-area__stop--bottom`, offset: "1" })))));
-    const ticks = [...new Set([0, Math.ceil(max / 2), max])];
-    chart.append(...ticks.map((tick) => svg("g", {},
-      svg("line", { class: "dashboard-profile__grid", x1: pad.left, x2: width - pad.right, y1: y(tick), y2: y(tick) }),
-      svg("text", { class: "dashboard-profile__tick", x: pad.left - 8, y: y(tick) + 4, "text-anchor": "end" }, Core.number(tick)))));
-    const curves = series.map(([key]) => {
-      const points = ordered.map((row, index) => [x(index), y(row[key])]);
-      return { key, points, line: smoothPath(points) };
-    });
-    // areas first, so both lines stay on top of them
-    chart.append(...curves.map(({ key, points, line }) => svg("path", {
-      class: `dashboard-profile__area dashboard-profile__area--${key}`,
-      d: `${line} L${points[points.length - 1][0]},${base} L${points[0][0]},${base} Z`,
-      fill: `url(#dashboard-area-${key})`,
-    })));
-    chart.append(...curves.map(({ key, line }) => svg("path", {
-      class: `dashboard-profile__line dashboard-profile__line--${key}`,
-      d: line,
-      pathLength: 1,
-    })));
-    for (const [key, label] of series) {
-      chart.append(...ordered.map((row, index) => {
-        const count = row[key];
-        return svg("a", {
-          class: `dashboard-profile__point dashboard-profile__point--${key}`,
-          href: href("claims", null, { rule: row.rule.rule_id }),
-          "aria-label": `${row.rule.rule_id}, ${row.rule.title}: ${Core.number(count)} ${label}; view claims`,
-        }, svg("circle", { cx: x(index), cy: y(count), r: 5 }),
-        svg("title", {}, `${row.rule.rule_id} · ${Core.number(row.fail)} failed · ${Core.number(row.unable)} unable to assess`));
-      }));
-    }
-    chart.append(...ordered.map((row, index) => svg("text", {
-      class: "dashboard-profile__label",
-      x: x(index),
-      y: height - 8,
-      "text-anchor": "middle",
-    }, row.rule.rule_id)));
-    return chart;
+    return h("div", { class: "dashboard-rules" }, ordered.map((row) => h("a", {
+      class: "dashboard-rule",
+      href: href("claims", null, { rule: row.rule.rule_id }),
+      title: `${row.rule.rule_id} ${row.rule.title}`,
+      "aria-label": `${row.rule.rule_id}, ${row.rule.title}: ${Core.number(row.fail)} failed, ${Core.number(row.unable)} unable to assess; view claims`,
+    },
+    h("span", { class: "mono", text: row.rule.rule_id }),
+    h("span", { class: "dashboard-rule__bars" }, [["fail", "escalate"], ["unable", "review"]].map(([key, tone]) => [
+      h("span", { class: "bar__track" }, h("span", { class: `bar__fill fill-${tone}`, style: { width: `${100 * row[key] / max}%` } })),
+      h("span", { class: "bar__value", text: Core.number(row[key]) }),
+    ])))));
   }
 
   function profileCard(rows) {
     return card({ title: "Rule outcomes profile", meta: `Source: ${FROM.results}`,
-      body: rows.length ? h("div", { class: "dashboard-profile-wrap" },
+      body: rows.length ? h("div", {},
         ruleProfile(rows),
         h("div", { class: "dashboard-profile__legend" },
           h("span", {}, h("i", { class: "dashboard-profile__key dashboard-profile__key--fail" }), "Failed"),
@@ -231,14 +172,13 @@ const Dashboard = (function () {
   }
 
   // Where the review stands: one vertical bar per claim state, each a link to
-  // its list. Heights come from f.outcomes; the percent is of all claims.
+  // its list. A bar's height is its percent of all claims.
   function progressCard(f) {
     const total = CLAIMS.length;
     const routed = CLAIMS.filter((c) => c.route.reasons.length).length;
     const keys = Core.OUTCOME_ORDER.filter((k) => k !== "rechecked" || f.outcomes[k]);
-    const max = Math.max(1, ...keys.map((k) => f.outcomes[k]));
     const body = routed
-      ? h("div", { class: "dashboard-volume dashboard-volume--dense" }, keys.map((k, index) => {
+      ? h("div", { class: "dashboard-volume" }, keys.map((k) => {
         const outcome = Core.OUTCOME[k];
         const count = f.outcomes[k];
         const percent = total ? (100 * count / total).toFixed(1) : "0.0";
@@ -251,8 +191,7 @@ const Dashboard = (function () {
         h("strong", { class: "dashboard-volume__count" }, Core.number(count)),
         h("span", { class: "dashboard-volume__track" },
           h("span", { class: `dashboard-volume__fill fill-${outcome.tone}${count ? "" : " is-zero"}`,
-            style: { height: `${100 * count / max}%`,
-              animationDelay: `calc(var(--draw-delay) + ${index} * var(--bar-stagger))` } })),
+            style: { height: `${percent}%` } })),
         h("span", { class: "dashboard-volume__label" }, outcome.label),
         h("span", { class: "dashboard-volume__percent" }, `${percent}%`));
       }))
@@ -317,31 +256,6 @@ const Dashboard = (function () {
     if (el) { el.setAttribute("tabindex", "-1"); el.scrollIntoView({ behavior: scrollBehavior(), block: "start" }); el.focus({ preventScroll: true }); }
   }
 
-  // Counters: slow, decelerating count; each stat pops once when it lands.
-  // Durations come from the CSS tokens, so the motion stays in one place.
-  function animateCounters(root) {
-    if (reducedMotion()) return;
-    const style = getComputedStyle(document.documentElement);
-    const duration = parseFloat(style.getPropertyValue("--duration-count")) || 2200;
-    const step = parseFloat(style.getPropertyValue("--stagger-rise")) || 90;
-    root.querySelectorAll(".grid--4 .stat__value").forEach((el, index) => {
-      const target = Number(el.textContent.replace(/,/g, ""));
-      if (!Number.isSafeInteger(target) || target <= 0) return;
-      el.textContent = "0";
-      const begin = performance.now() + 350 + index * step; // after its card has started to rise
-      const tick = (now) => {
-        const progress = Math.min(1, Math.max(0, (now - begin) / duration));
-        el.textContent = Core.number(Math.round(target * (1 - (1 - progress) ** 4)));
-        if (progress < 1) requestAnimationFrame(tick);
-        else {
-          el.classList.add("is-popped");
-          el.addEventListener("animationend", () => el.classList.remove("is-popped"), { once: true });
-        }
-      };
-      requestAnimationFrame(tick);
-    });
-  }
-
   function render(route) {
     const events = decisions();
     const f = Core.funnel(DATA, events);
@@ -355,7 +269,7 @@ const Dashboard = (function () {
     // "Rejected at ingestion" links here with ?focus=rejected.
     if (route && route.params.focus === "rejected") queueMicrotask(() => scrollTo("sec-rejected"));
 
-    const page = h("div", { class: "stack stagger dashboard" },
+    return h("div", { class: "stack stagger dashboard" },
       statRow([
         statCard({ icon: "inbox", tone: "unknown", label: "Routed for review", value: Core.number(routed),
           caption: `${Core.number(open)} still open`, source: FROM.routes, href: href("queue") }),
@@ -378,15 +292,9 @@ const Dashboard = (function () {
         h("div", { class: "stack" },
           h("div", { class: "grid grid--2 dashboard__overview" }, routeCard(f), progressCard(f)),
           profileCard(rows),
-          card({ title: "Rules most often failing or unassessed", meta: `Source: ${FROM.results}`, flush: true, body: ruleTable(rows) })),
+          card({ title: "Rules most often failing or unassessed", meta: `Source: ${FROM.results}`, flush: true, body: ruleTable(rows.slice(0, 8)) })),
         h("div", { class: "stack" }, draftsCard(), auditCard())),
       Object.assign(rejectedCard(), { id: "sec-rejected" }));
-
-    // Every card rises in turn, bottom to top: its place in the page sets its
-    // delay (capped, so the last cards do not wait long).
-    page.querySelectorAll(".card, .stat").forEach((el, index) => el.style.setProperty("--i", Math.min(index, 9)));
-    requestAnimationFrame(() => animateCounters(page));
-    return page;
   }
 
   return { render };

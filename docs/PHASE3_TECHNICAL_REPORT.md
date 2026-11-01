@@ -2,9 +2,9 @@
 
 **Team:** MedNexus  
 **Project:** ClaimGuard AI — synthetic healthcare-claim pre-validation and human review  
-**Report date:** 1 November 2026  
+**Report date:** 2 November 2026  
 **Repository:** [tammam-bt/ClaimGuardAI_MedNexus](https://github.com/tammam-bt/ClaimGuardAI_MedNexus)  
-**Current repository revision:** `932f59d`  
+**Test results recorded at revision:** `4f73bf2`  
 **Data classification:** Synthetic educational data only
 
 > This report describes the implementation in this repository. It does not claim
@@ -77,9 +77,7 @@ for a reproducible reviewer/admin walkthrough and
 
 ## 2. Team overview and contributions
 
-The contribution roles below follow the repository's team record. They describe
-the assigned areas and should be confirmed by each member before final
-submission.
+The contribution roles below follow the repository's team record.
 
 | Team member | Main contribution |
 |---|---|
@@ -132,14 +130,15 @@ is the final interactive mockup:
 +-------------------+------------------------------------------------------+
 | ClaimGuard AI     | Dashboard             Search claim/rule    Role     |
 |                   +------------------------------------------------------+
-| Dashboard         | Run lifecycle: received -> checked -> routed -> review|
-| Review Queue      +--------------------+------------------+--------------+
-| Claims            | Routing outcomes   | Review progress  | Drafts       |
+| Dashboard         | Four headline counts                                 |
+| Review Queue      +------------------------------------------------------+
+| Claims            | Run life cycle: received -> checked -> routed -> ... |
 | Audit Logs        +--------------------+------------------+--------------+
-| Rules             | Rule outcome profile                | Audit status |
-| Evaluation        +------------------------------------------------------+
-| Settings          | Claims by route and other run summaries             |
-+-------------------+------------------------------------------------------+
+| Rules             | Routing outcomes   | Review progress  | Your drafts  |
+| Evaluation        +--------------------+------------------+              |
+| Settings          | Rule outcomes profile                 | Audit log    |
+|                   | Rules most often failing or unassessed|              |
++-------------------+---------------------------------------+--------------+
 ```
 
 The claim review workspace presents findings, their rule-linked evidence,
@@ -251,12 +250,14 @@ Phase planning, decisions, and implementation evidence are recorded in
 
 ## 8. Testing results
 
-The repository's readiness report records the following regression results
-for Python 3.10.21 and 3.12.14:
+The pack check and test suite were rerun at revision `4f73bf2` on 2 November
+2026, on Windows, with Python 3.10.21 and 3.12.14. The engine code has not
+changed since the split results below were recorded in the readiness report;
+later changes touch the interface, its tests and the documentation.
 
 - `python src/validate_pack.py`: PASS.
-- `python -m unittest discover -s tests` with `REQUIRE_E2E=1`: 606 tests OK
-  on each version, including browser end-to-end tests.
+- `python -m unittest discover -s tests` with `REQUIRE_E2E=1`: 606 tests run,
+  OK, 4 skipped on each version, including browser end-to-end tests.
 - Public synthetic splits: 400 development, 150 validation, and 50 stress
   claims. Reported status accuracy and issue F1 are 1.000 on these splits;
   false FAIL pairs are zero.
@@ -297,7 +298,29 @@ results, latency, baseline comparison, and limitations.
 9. Add deployment packaging (for example Docker) only when a defined hosting
    and operational need exists.
 
-## 10. References and submission checklist
+## 10. Bonus functionalities implemented
+
+**Cryptographic / local ledger audit log (implemented).** Every run event and
+review decision is appended to a local SHA-256 hash chain, with a separate
+anchor file and an optional check against a head recorded outside the machine.
+`python -m claimguard.audit.tamper_demo` shows that edits, removals, deletion
+and rewrites are detected. Limit: rewriting both the log and its anchor goes
+undetected unless the head was recorded elsewhere. The log is tamper-evident,
+not immutable.
+
+**Additional functionalities (Other).** A local review server saves decisions
+and corrections from the page, using a per-launch token and optional sign-in.
+A review gate blocks a claim until its required decisions are recorded on the
+latest version.
+
+**Partial, not claimed as complete.** An override feedback report measures
+human overrides for review, but nothing learns automatically. The local REST
+API has no streaming or WebSocket support.
+
+**Not implemented.** OCR/RAG attachment parsing and dynamic payer-rule
+management.
+
+## 11. References
 
 - [Source repository](https://github.com/tammam-bt/ClaimGuardAI_MedNexus)
 - [Architecture and data flow](./ARCHITECTURE.md)
@@ -307,8 +330,3 @@ results, latency, baseline comparison, and limitations.
 - [Privacy and security note](./PRIVACY_SECURITY.md)
 - [Readiness and regression evidence](./READINESS.md)
 - [Demo walkthrough](./DEMO_WALKTHROUGH.md)
-
-Before submission, confirm the contribution table with the team, capture
-current UI screenshots from the final revision for the presentation, verify
-that the reported repository revision matches the submitted source, and rerun
-the documented validation/test commands in the submission environment.

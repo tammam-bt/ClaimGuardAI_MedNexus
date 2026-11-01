@@ -204,9 +204,11 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(d["focusRejected"], "sec-rejected")
         self.assertIn("#/claims?stage=to_review", d["barLinks"])
         self.assertIn("#/claims?route=ESCALATE", d["barLinks"])
+        # The rule chart leaves out no rule that has a result to show.
+        self.assertEqual(len(d["profileRules"]), 15)
         self.assertTrue(d["ruleLinks"] and all(h.startswith("#/claims?rule=R") for h in d["ruleLinks"]))
         # Where the review stands replaces the count of every check, which answered no question.
-        self.assertIn("Where the review stands", d["titles"])
+        self.assertIn("Review status", d["titles"])
         self.assertNotIn("Results", d["titles"])
         # An empty card points to the next action.
         self.assertIn("No draft in this browser", d["drafts"])

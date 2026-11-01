@@ -253,6 +253,8 @@ function statCard(opts) {
     h("span", { class: "stat__body" },
       h("span", { class: "stat__label", text: o.label }),
       h("span", { class: "stat__value", text: o.value }),
+      o.badge ? h("span", { class: "stat__badge" }, badge(o.badge.text, { tone: o.badge.tone })) : null,
+      typeof o.meter === "number" ? h("span", { class: "stat__meter" }, h("span", { class: `bar__fill fill-${o.meterTone || "primary"}`, style: { width: `${o.meter}%` } })) : null,
       o.caption ? h("span", { class: "stat__caption", text: o.caption }) : null,
       o.source ? h("span", { class: "stat__source", text: `Source: ${o.source}` }) : null),
   ];
@@ -488,7 +490,7 @@ function ruleName(ruleId) { const r = RULE_BY_ID.get(ruleId); return r ? r.title
 // The 15 checks of one claim, in rule order.
 function checkGrid(results, opts) {
   const o = opts || {};
-  return h("ul", { class: "checks", "aria-label": "All 15 checks" }, results.map((r) => {
+  return roving(h("ul", { class: "checks", "aria-label": "All 15 checks" }, results.map((r) => {
     const s = Core.STATUS[r.status];
     const inner = [h("span", { class: "check__top" }, icon(s.icon, { size: "sm" }), h("span", { class: "check__id", text: r.rule_id })),
       h("span", { class: "check__name", text: ruleName(r.rule_id) })];
@@ -497,7 +499,7 @@ function checkGrid(results, opts) {
     return h("li", {}, o.onPick
       ? h("button", { type: "button", class: cls, title, onClick: () => o.onPick(r), style: { width: "100%", cursor: "pointer", font: "inherit", textAlign: "left" } }, inner)
       : h("span", { class: cls, title }, inner));
-  }));
+  })), "button");
 }
 
 // Evidence as the engine cited it: the field, named for a reviewer (the
@@ -513,9 +515,27 @@ function evidenceTable(evidence, claim) {
 }
 
 // The life cycle of one claim (Core.lifecycle) or of the run (same look).
+// A group of controls as one tab stop: the arrow keys move inside it.
+function roving(group, selector) {
+  const items = () => [...group.querySelectorAll(selector)];
+  items().forEach((el, i) => { el.tabIndex = i ? -1 : 0; });
+  group.addEventListener("keydown", (ev) => {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[ev.key];
+    const list = items();
+    const at = list.indexOf(document.activeElement);
+    if (!step || at < 0) return;
+    ev.preventDefault();
+    const next = list[(at + step + list.length) % list.length];
+    list[at].tabIndex = -1;
+    next.tabIndex = 0;
+    next.focus();
+  });
+  return group;
+}
+
 function lifecycleStrip(stages, opts) {
   const o = opts || {};
-  return h("ol", { class: "lifecycle", "aria-label": o.label || "Life cycle" }, stages.map((s, i) => {
+  return roving(h("ol", { class: "lifecycle", "aria-label": o.label || "Life cycle" }, stages.map((s, i) => {
     // The stage's own icon, except a failed or warning stage, which shows the
     // FAIL or warning icon (the same concepts as everywhere else).
     const glyph = s.state === "fail" ? "x-circle" : s.state === "warn" ? "alert-triangle" : s.icon;
@@ -528,7 +548,7 @@ function lifecycleStrip(stages, opts) {
     return h("li", {}, o.onPick
       ? h("button", { type: "button", class: cls, style: { width: "100%" }, onClick: () => o.onPick(s) }, inner)
       : h("div", { class: cls }, inner));
-  }));
+  })), "button");
 }
 
 // ------------------------------------------------- signature components

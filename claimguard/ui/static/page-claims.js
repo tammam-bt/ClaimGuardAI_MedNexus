@@ -102,6 +102,8 @@ const ClaimViews = (function () {
           { key: "total", label: "Total", num: true, sort: (e) => (typeof e.claim.total_amount === "number" ? e.claim.total_amount : -1),
             render: (e) => Core.money(e.claim.total_amount, e.claim.currency) },
           { key: "submitted", label: "Submitted", sort: (e) => e.claim.submission_date, render: (e) => Core.date(e.claim.submission_date) },
+          // The whole row opens the claim; this only says so.
+          { key: "view", label: "Actions", render: () => h("span", { class: "table__view", text: "View" }) },
         ],
       }));
     }
@@ -719,6 +721,18 @@ const ClaimDetail = (function () {
     };
     const counts = Core.statusCounts(cur.results);
     const finds = Core.findings(entry);
+    // The checks, narrowed by status with the chips above them.
+    const openCheck = (r) => (finds.some((f) => f.result.rule_id === r.rule_id) ? pick(r.rule_id) : resultPanel(cur, r));
+    const checksHolder = h("div");
+    const drawChecks = (status) => fill(checksHolder, checkGrid(cur.results.filter((r) => !status || r.status === status), { onPick: openCheck }));
+    const statusChips = roving(h("div", { class: "row row--tight", role: "group", "aria-label": "Show checks by status" },
+      [["", "All", cur.results.length], ["PASS", "Passed", counts.PASS], ["FAIL", "Failed", counts.FAIL],
+        ["UNABLE_TO_ASSESS", "Unable", counts.UNABLE_TO_ASSESS], ["NOT_APPLICABLE", "N/A", counts.NOT_APPLICABLE]].map(([status, text, n], i) =>
+        h("button", { type: "button", class: "chip", "aria-pressed": String(!i), onClick: (ev) => {
+          statusChips.querySelectorAll(".chip").forEach((c) => c.setAttribute("aria-pressed", String(c === ev.currentTarget)));
+          drawChecks(status);
+        } }, `${text} (${n})`))), "button");
+    drawChecks("");
 
     return h("div", { class: "stack" },
       h("header", { class: "claim-head" },
@@ -737,13 +751,13 @@ const ClaimDetail = (function () {
       cur.version > 1 ? callout({ tone: "info", icon: "refresh", title: `Deciding on version ${cur.version}`,
         text: `This claim was corrected and rechecked. Its findings, checks and data are those of v${cur.version}; ` +
           "decisions on an earlier version no longer count. The claim as received (v1) is kept unchanged below." }) : null,
-      finds.length ? section("sec-findings", ws) : section("sec-findings", routeCallout(cur, pick)),
-      finds.length ? section("sec-route", routeCallout(cur, pick)) : null,
       card({ level: 3, title: "Life cycle", body: lifecycleHolder }),
+      section("sec-route", routeCallout(cur, pick)),
       section("sec-checks", card({ level: 3, title: `All 15 checks${onVersion}`,
         meta: `${counts.PASS} passed · ${counts.FAIL} failed · ${counts.UNABLE_TO_ASSESS} unable · ${counts.NOT_APPLICABLE} n/a` +
           (counts.NOT_IMPLEMENTED ? ` · ${counts.NOT_IMPLEMENTED} not implemented` : ""),
-        body: checkGrid(cur.results, { onPick: (r) => (finds.some((f) => f.result.rule_id === r.rule_id) ? pick(r.rule_id) : resultPanel(cur, r)) }) })),
+        body: h("div", { class: "stack" }, statusChips, checksHolder) })),
+      finds.length ? section("sec-findings", ws) : null,
       versionsCard(entry),
       correctionCard(entry),
       historyHolder,

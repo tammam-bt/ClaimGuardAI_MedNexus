@@ -29,26 +29,56 @@ const Dashboard = (function () {
       .sort((a, b) => (b.fail + b.unable) - (a.fail + a.unable));
   }
 
-  function ruleTable(rows) {
-    // A rule opens the claims it failed or could not assess.
-    return table({ caption: "Rules most often failing or unassessed", rows,
-      empty: emptyState({ icon: "check-check", title: "No rule failed", text: "Every check passed or did not apply, so no claim needs a review.",
-        action: linkButton({ href: href("claims"), label: "See every claim", icon: "arrow-right" }) }),
-      rowHref: (x) => href("claims", null, { rule: x.rule.rule_id }),
-      columns: [
-        { key: "rule", label: "Rule", render: (x) => h("span", {}, h("span", { class: "mono", text: x.rule.rule_id }), ` ${x.rule.title}`) },
-        { key: "severity", label: "Severity", render: (x) => severityBadge(x.rule.severity) },
-        { key: "fail", label: "Failed", num: true, sort: (x) => x.fail, render: (x) => Core.number(x.fail) },
-        { key: "unable", label: "Unable", num: true, sort: (x) => x.unable, render: (x) => Core.number(x.unable) },
-      ] });
+  const share = (n, total) => (total ? (100 * n / total).toFixed(1) : "0.0");
+
+  // The rules most often failing or unassessed, as stacked bars. A rule opens
+  // the claims it failed or could not assess; the chips only change the view.
+  function topRules(rows) {
+    if (!rows.length) return emptyState({ icon: "check-check", title: "No rule failed", text: "Every check passed or did not apply, so no claim needs a review.",
+      action: linkButton({ href: href("claims"), label: "See every claim", icon: "arrow-right" }) });
+    const view = { metric: "total", severity: "" };
+    const metric = (x) => (view.metric === "fail" ? x.fail : view.metric === "unable" ? x.unable : x.fail + x.unable);
+    const holder = h("div", { class: "dashboard-top" });
+    const chips = h("div", { class: "chips" });
+    const chip = (key, val, text) => h("button", { type: "button", class: "chip", "aria-pressed": String(view[key] === val),
+      onClick: () => { view[key] = val; draw(); } }, text);
+    function draw() {
+      fill(chips,
+        h("div", { class: "row row--tight", role: "group", "aria-label": "Count" },
+          chip("metric", "total", "Total"), chip("metric", "fail", "Failed"), chip("metric", "unable", "Unable")),
+        h("div", { class: "row row--tight", role: "group", "aria-label": "Severity" },
+          chip("severity", "", "All"), chip("severity", "high", "High"), chip("severity", "medium", "Medium")));
+      const shown = rows.filter((x) => metric(x) && (!view.severity || x.rule.severity === view.severity))
+        .sort((a, b) => metric(b) - metric(a)).slice(0, 8);
+      const max = Math.max(1, ...shown.map(metric));
+      fill(holder, shown.length ? shown.map((x) => h("a", {
+        class: "dashboard-top__row",
+        href: href("claims", null, { rule: x.rule.rule_id }),
+        title: `${x.rule.rule_id} ${x.rule.title}: ${Core.number(x.fail)} failed, ${Core.number(x.unable)} unable to assess`,
+      },
+      h("span", { class: "dashboard-top__rule" }, h("span", { class: "mono", text: x.rule.rule_id }), ` ${x.rule.title}`),
+      severityBadge(x.rule.severity),
+      h("span", { class: "dashboard-top__bar" },
+        view.metric !== "unable" ? h("span", { class: "dashboard-top__fail", style: { width: `${100 * x.fail / max}%` } }) : null,
+        view.metric !== "fail" ? h("span", { class: "dashboard-top__unable", style: { width: `${100 * x.unable / max}%` } }) : null),
+      h("span", { class: "dashboard-top__value", text: Core.number(metric(x)) })))
+        : h("p", { class: "muted small", text: "No rule matches this view." }));
+    }
+    draw();
+    return h("div", { class: "stack" }, chips,
+      h("div", { class: "dashboard-profile__legend" },
+        h("span", {}, h("i", { class: "dashboard-profile__key dashboard-profile__key--fail" }), "Failed"),
+        h("span", {}, h("i", { class: "dashboard-profile__key dashboard-profile__key--unable" }), "Unable to assess")),
+      holder);
   }
 
   function routeCard(f) {
     const total = CLAIMS.length;
     const radius = 68;
     const routed = (f.routes.ESCALATE || 0) + (f.routes.REVIEW || 0);
-    const value = h("strong", { class: "dashboard-route__value", id: "dashboard-route-value", text: Core.number(routed) });
-    const label = h("span", { class: "dashboard-route__label", id: "dashboard-route-label", text: "Routed for review" });
+    const humanShare = `${Math.round(Number(share(routed, total)))}%`;
+    const value = h("strong", { class: "dashboard-route__value", id: "dashboard-route-value", text: humanShare });
+    const label = h("span", { class: "dashboard-route__label", id: "dashboard-route-label", text: "need a human" });
     const chart = svg("svg", { class: "dashboard-donut", viewBox: "0 0 180 180", "aria-label": "Claims by route" },
       svg("circle", { class: "dashboard-donut__track", cx: 90, cy: 90, r: radius }));
     const items = Core.ROUTE_ORDER.map((key) => ({
@@ -101,7 +131,7 @@ const Dashboard = (function () {
 
     function showRoute(item) {
       value.textContent = Core.number(item.value);
-      label.textContent = `${item.route.label} · ${total ? (100 * item.value / total).toFixed(1) : "0.0"}%`;
+      label.textContent = `${item.route.label} · ${share(item.value, total)}%`;
       chart.classList.add("is-active");
       chart.querySelectorAll(".dashboard-donut__link").forEach((link) => {
         link.classList.toggle("is-active", link.getAttribute("aria-label").startsWith(`${item.route.label}:`));
@@ -109,15 +139,14 @@ const Dashboard = (function () {
       legendLinks.forEach((link) => link.classList.toggle("is-active", link.dataset.route === item.key));
     }
     function resetRoute() {
-      value.textContent = Core.number(routed);
-      label.textContent = "Routed for review";
+      value.textContent = humanShare;
+      label.textContent = "need a human";
       chart.classList.remove("is-active");
       chart.querySelectorAll(".dashboard-donut__link").forEach((link) => link.classList.remove("is-active"));
       legendLinks.forEach((link) => link.classList.remove("is-active"));
     }
 
     const legend = h("div", { class: "dashboard-route__legend" }, items.map((item) => {
-      const percent = total ? (100 * item.value / total).toFixed(1) : "0.0";
       const link = h("a", {
         class: "dashboard-route__item",
         "data-route": item.key,
@@ -128,12 +157,13 @@ const Dashboard = (function () {
         onBlur: resetRoute,
       },
       h("span", { class: `dashboard-route__dot dashboard-route__dot--${item.key.toLowerCase()}` }),
-      h("span", { class: "dashboard-route__name" }, item.route.label, h("span", { class: "muted" }, `${percent}%`)),
-      h("strong", { class: "dashboard-route__count" }, Core.number(item.value)));
+      h("span", { class: "dashboard-route__name" }, item.route.label, h("span", { class: "muted" }, `${share(item.value, total)}%`)),
+      h("strong", { class: "dashboard-route__count" }, Core.number(item.value)),
+      h("span", { class: "dashboard-route__help", text: item.route.help }));
       legendLinks.push(link);
       return link;
     }));
-    return card({ title: "Routing outcomes", meta: `Source: ${FROM.routes}`,
+    return card({ title: `Where ${Core.plural(Core.number(total), "claim")} went`, meta: `Source: ${FROM.routes}`,
       body: h("div", { class: "dashboard-route" },
         h("div", { class: "dashboard-route__chart" }, chart,
           h("div", { class: "dashboard-route__center", "aria-live": "polite" }, value, label)),
@@ -171,33 +201,66 @@ const Dashboard = (function () {
     });
   }
 
-  // Where the review stands: one vertical bar per claim state, each a link to
-  // its list. A bar's height is its percent of all claims.
-  function progressCard(f) {
+  // Review status: a tile per claim state, each a link to its list, the share
+  // of each state below them, and this browser's drafts.
+  function statusCard(f) {
     const total = CLAIMS.length;
     const routed = CLAIMS.filter((c) => c.route.reasons.length).length;
     const keys = Core.OUTCOME_ORDER.filter((k) => k !== "rechecked" || f.outcomes[k]);
+    const filled = keys.filter((k) => f.outcomes[k]);
     const body = routed
-      ? h("div", { class: "dashboard-volume" }, keys.map((k) => {
-        const outcome = Core.OUTCOME[k];
-        const count = f.outcomes[k];
-        const percent = total ? (100 * count / total).toFixed(1) : "0.0";
-        return h("a", {
-          class: "dashboard-volume__item",
+      ? h("div", { class: "stack" },
+        h("div", { class: "dashboard-status" }, keys.map((k) => h("a", {
+          class: "dashboard-status__tile",
           href: href("claims", null, { stage: k }),
-          title: `${outcome.label}: ${Core.number(count)} of ${Core.number(total)} claims`,
-          "aria-label": `${outcome.label}: ${Core.number(count)} claims, ${percent}%; view claims`,
+          "aria-label": `${Core.OUTCOME[k].label}: ${Core.number(f.outcomes[k])} claims, ${share(f.outcomes[k], total)}%; view claims`,
         },
-        h("strong", { class: "dashboard-volume__count" }, Core.number(count)),
-        h("span", { class: "dashboard-volume__track" },
-          h("span", { class: `dashboard-volume__fill fill-${outcome.tone}${count ? "" : " is-zero"}`,
-            style: { height: `${percent}%` } })),
-        h("span", { class: "dashboard-volume__label" }, outcome.label),
-        h("span", { class: "dashboard-volume__percent" }, `${percent}%`));
-      }))
-      : emptyState({ icon: "check-check", title: "Nothing to review", text: "Every claim passed its checks or had nothing to decide.",
-        action: linkButton({ href: href("claims", null, { stage: "ready" }), label: "See the ready claims", icon: "arrow-right" }) });
-    return card({ title: "Where the review stands", meta: `Source: ${FROM.review}`, body });
+        h("strong", { class: "dashboard-status__count", text: Core.number(f.outcomes[k]) }),
+        h("span", { class: "dashboard-status__label" },
+          h("i", { class: `dashboard-status__dot fill-${Core.OUTCOME[k].tone}` }), Core.OUTCOME[k].label)))),
+        h("div", { class: "dashboard-share", role: "img",
+          "aria-label": filled.map((k) => `${Core.OUTCOME[k].label} ${share(f.outcomes[k], total)}%`).join(", ") },
+        filled.map((k) => h("span", { class: `fill-${Core.OUTCOME[k].tone}`, style: { width: `${share(f.outcomes[k], total)}%` } }))),
+        h("div", { class: "dashboard-share__legend" }, filled.map((k) => h("span", {},
+          h("i", { class: `dashboard-status__dot fill-${Core.OUTCOME[k].tone}` }), `${Core.OUTCOME[k].label} ${Math.round(Number(share(f.outcomes[k], total)))}%`))),
+        draftsCard())
+      : h("div", { class: "stack" }, emptyState({ icon: "check-check", title: "Nothing to review", text: "Every claim passed its checks or had nothing to decide.",
+        action: linkButton({ href: href("claims", null, { stage: "ready" }), label: "See the ready claims", icon: "arrow-right" }) }), draftsCard());
+    return card({ title: "Review status", meta: `Source: ${FROM.review}`, body });
+  }
+
+  // Claims by route: one column per route, scaled to the largest.
+  function routeBars(f) {
+    const total = CLAIMS.length;
+    const max = Math.max(1, ...Core.ROUTE_ORDER.map((r) => f.routes[r] || 0));
+    return card({ title: "Claims by route", meta: `Source: ${FROM.routes}`, body: h("div", { class: "dashboard-volume" }, Core.ROUTE_ORDER.map((r) => {
+      const count = f.routes[r] || 0;
+      return h("a", {
+        class: "dashboard-volume__item",
+        href: href("claims", null, { route: r }),
+        "aria-label": `${Core.ROUTE[r].label}: ${Core.number(count)} claims, ${share(count, total)}%; view claims`,
+      },
+      h("strong", { class: "dashboard-volume__count" }, Core.number(count)),
+      h("span", { class: "dashboard-volume__track" },
+        h("span", { class: `dashboard-volume__fill fill-${Core.ROUTE[r].tone}${count ? "" : " is-zero"}`, style: { height: `${100 * count / max}%` } })),
+      h("span", { class: "dashboard-volume__label" }, Core.ROUTE[r].label),
+      h("span", { class: "dashboard-volume__percent" }, `${share(count, total)}%`));
+    })) });
+  }
+
+  // The life cycle, how far it has come, and any stage that needs attention.
+  function lifecycleCard(f, stages, onPick) {
+    const done = stages.filter((s) => s.state === "done" || s.state === "warn").length;
+    const attention = stages.filter((s) => s.state === "warn" || s.state === "fail");
+    return card({ title: "Life cycle of this run", meta: "Source: run manifest, results, audit log and this browser", body: h("div", { class: "stack" },
+      h("div", {}, badge(`${done} / ${stages.length} stages`, { tone: "pass" })),
+      lifecycleStrip(stages, { label: "Life cycle of this run", onPick }),
+      attention.map((s) => h("div", { class: "dashboard-attention" },
+        badge("Needs attention", { tone: s.state === "fail" ? "fail" : "unknown" }),
+        h("strong", { text: s.label }),
+        h("span", { text: s.key === "screened" && f.flagged
+          ? `Instruction-like text found in ${Core.plural(Core.number(f.flagged), "claim")}. All 15 rules still ran; the text is withheld from the model.`
+          : s.summary })))) });
   }
 
   function auditCard() {
@@ -216,7 +279,7 @@ const Dashboard = (function () {
         linkButton({ href: href("audit"), label: "Open audit log", icon: "arrow-right", variant: "ghost" })),
         latest.map((row) => {
           const e = row.event || {};
-          return h("div", { class: "small" },
+          return h("div", { class: "small dashboard-audit__item" },
             h("div", { class: "row" }, eventBadge(e),
               e.claim_id ? h("a", { class: "mono", href: href("claims", e.claim_id), text: e.claim_id }) : null),
             h("div", { class: "muted", text: `#${row.sequence} · ${Core.datetime(row.recorded_at)}` }));
@@ -269,32 +332,32 @@ const Dashboard = (function () {
     // "Rejected at ingestion" links here with ?focus=rejected.
     if (route && route.params.focus === "rejected") queueMicrotask(() => scrollTo("sec-rejected"));
 
+    const total = CLAIMS.length;
     return h("div", { class: "stack stagger dashboard" },
       statRow([
         statCard({ icon: "inbox", tone: "unknown", label: "Routed for review", value: Core.number(routed),
+          badge: { text: "Active queue", tone: "unknown" }, meter: Number(share(routed, total)), meterTone: "review",
           caption: `${Core.number(open)} still open`, source: FROM.routes, href: href("queue") }),
         statCard({ icon: Core.OUTCOME.ready.icon, tone: "pass", label: "Ready for submission", value: Core.number(f.outcomes.ready),
+          badge: { text: "Pre-check settled", tone: "pass" }, meter: Number(share(f.outcomes.ready, total)), meterTone: "clear",
           caption: "Pre-check passed or settled; not payer approval", source: FROM.review, href: href("claims", null, { stage: "ready" }) }),
         statCard({ icon: "shield-alert", tone: "unknown", label: "Flagged for injection", value: Core.number(f.flagged),
+          badge: f.flagged ? { text: "Text withheld", tone: "fail" } : { text: "None flagged", tone: "pass" }, meter: Number(share(f.flagged, total)), meterTone: "escalate",
           caption: "All 15 rules still ran; text withheld from the model", source: FROM.manifest, href: href("claims", null, { flag: "flagged" }) }),
         statCard({ icon: "file-x", tone: f.rejected ? "fail" : "neutral", label: "Rejected at ingestion", value: Core.number(f.rejected),
+          badge: { text: `${share(f.received - f.rejected, f.received)}% ingested`, tone: f.rejected ? "unknown" : "pass" }, meter: Number(share(f.received - f.rejected, f.received)), meterTone: "clear",
           caption: `Of ${Core.plural(Core.number(f.received), "record")} received`, source: FROM.manifest, href: href("dashboard", null, { focus: "rejected" }) }),
       ]),
-      card({ title: "Life cycle of this run", meta: "Source: run manifest, results, audit log and this browser", body: lifecycleStrip(Core.runStages(DATA, events), {
-        label: "Life cycle of this run",
-        onPick: (s) => {
-          const [key, anchor, params] = toPage[s.key];
-          if (key === "dashboard") scrollTo(anchor);
-          else go(key, null, params);
-        },
-      }) }),
-      h("div", { class: "grid grid--main-side" },
-        h("div", { class: "stack" },
-          h("div", { class: "grid grid--2 dashboard__overview" }, routeCard(f), progressCard(f)),
-          profileCard(rows),
-          card({ title: "Rules most often failing or unassessed", meta: `Source: ${FROM.results}`, flush: true, body: ruleTable(rows.slice(0, 8)) })),
-        h("div", { class: "stack" }, draftsCard(), auditCard())),
-      Object.assign(rejectedCard(), { id: "sec-rejected" }));
+      h("div", { class: "dashboard-split" }, routeCard(f), statusCard(f)),
+      h("div", { class: "dashboard-split" }, profileCard(rows), routeBars(f)),
+      lifecycleCard(f, Core.runStages(DATA, events), (s) => {
+        const [key, anchor, params] = toPage[s.key];
+        if (key === "dashboard") scrollTo(anchor);
+        else go(key, null, params);
+      }),
+      h("div", { class: "dashboard-split" },
+        card({ title: "Rules most often failing or unassessed", meta: `Source: ${FROM.results}`, body: topRules(rows) }),
+        h("div", { class: "stack" }, auditCard(), Object.assign(rejectedCard(), { id: "sec-rejected" }))));
   }
 
   return { render };

@@ -291,9 +291,9 @@ try {
       unsourced: cards.filter(c => !(c.querySelector('.card__meta') || {}).textContent?.includes('Source:')).map(c => c.querySelector('.card__title').textContent),
       statSources: [...document.querySelectorAll('.grid--4 .stat')].map(s => (s.querySelector('.stat__source') || {}).textContent || null),
       statLinks: [...document.querySelectorAll('.grid--4 .stat')].map(s => s.getAttribute('href')),
-      barLinks: [...document.querySelectorAll('.content a.dashboard-volume__item, .content a.dashboard-route__item')].map(a => a.getAttribute('href')),
+      barLinks: [...document.querySelectorAll('.content a.dashboard-status__tile, .content a.dashboard-volume__item, .content a.dashboard-route__item')].map(a => a.getAttribute('href')),
       profileRules: [...document.querySelectorAll('.content a.dashboard-rule')].map(a => a.getAttribute('href')),
-      ruleLinks: [...document.querySelectorAll('.content .row-link')].map(a => a.getAttribute('href')),
+      ruleLinks: [...document.querySelectorAll('.content a.dashboard-top__row')].map(a => a.getAttribute('href')),
       drafts: [...document.querySelectorAll('.content .card')].find(c => c.textContent.startsWith('Your drafts'))?.textContent || null,
     };
   })()`));

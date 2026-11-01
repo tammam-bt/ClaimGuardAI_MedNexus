@@ -69,6 +69,69 @@ const RECORDED = DATA.audit
 function decisions() { return RECORDED.concat(State.drafts); }
 function can(action) { return (DATA.rbac[State.role] || []).includes(action); }
 
+// ----------------------------------------------------------------- server
+// The local server (python -m claimguard.ui.serve), when this page came from
+// it: the server puts its launch token in DATA.server. Opened as a file, the
+// page has no token and never calls anything. status is /api/status's answer
+// (the audit log's verified count and head, sign-in); while it is null the
+// page works exactly as the offline file: drafts are downloaded.
+const Server = {
+  token: DATA.server ? String(DATA.server.token) : null,
+  status: null,
+  // What the last save did, kept across the reload that follows it, shown once.
+  notice: (() => {
+    const n = Store.get("notice", null);
+    if (n !== null) Store.set("notice", null);
+    return n && typeof n.title === "string" ? n : null;
+  })(),
+  get live() { return !!this.status; },
+  get user() { return this.status && this.status.signin ? this.status.signin.user : null; },
+  // Saving needs a signed-in person only when the server asks for sign-in.
+  get canSave() { return this.live && (!this.status.signin || !!this.user); },
+  async call(method, path, body) {
+    try {
+      const res = await fetch(path, { method, credentials: "same-origin", cache: "no-store",
+        headers: Object.assign({ "X-ClaimGuard-Token": this.token }, body ? { "Content-Type": "application/json" } : {}),
+        body: body ? JSON.stringify(body) : undefined });
+      let data = null;
+      try { data = await res.json(); } catch (e) { data = null; }
+      return { ok: res.ok, code: res.status, data: data || {} };
+    } catch (e) {
+      return { ok: false, code: 0, data: { error: "The local server does not answer: it may have been stopped." } };
+    }
+  },
+  // Signed in, the name and role are the server's, not this browser's.
+  async start() {
+    const r = await this.call("GET", "/api/status");
+    this.status = r.ok ? r.data : null;
+    if (this.user) {
+      State.reviewer = this.user;
+      State.role = this.status.signin.role === "admin" ? "admin" : "reviewer";
+      State.save();
+    }
+  },
+  // After a save the page is loaded again, so it shows the run's files as
+  // the server now has them: a saved decision then reads "In the audit log".
+  reloadWith(notice) { Store.set("notice", notice); location.reload(); },
+};
+// The gate's verdict after a save ({ claims, ready, blocked: { state: n } },
+// claimguard.review.gate), in the page's own words: Core.OUTCOME's labels,
+// and the states only the gate has.
+const GATE_STATE = { rejected: "Rejected at ingestion", not_checked: "Not checked", invalid_versions: "Versions that do not follow" };
+function gateLine(g) {
+  if (!g) return "";
+  if (g.error) return `The gate cannot judge: ${g.error}`;
+  const rank = (s) => { const i = Core.OUTCOME_ORDER.indexOf(s); return i < 0 ? Core.OUTCOME_ORDER.length : i; };
+  const blocked = Object.entries(g.blocked || {}).sort(([a], [b]) => rank(a) - rank(b))
+    .map(([s, n]) => `${Core.number(n)} ${((Core.OUTCOME[s] || {}).label || GATE_STATE[s] || Core.humanize(s)).toLowerCase()}`);
+  return `Gate: ${Core.number(g.ready)} of ${Core.plural(g.claims, "claim")} ready` + (blocked.length ? `; blocked: ${blocked.join(", ")}.` : ".");
+}
+// "R008 Fail → Pass", as every status is named on the page.
+function statusChange(c) {
+  const label = (s) => (Core.STATUS[s] || { label: s }).label;
+  return `${c.rule_id} ${label(c.before)} → ${label(c.after)}`;
+}
+
 // --------------------------------------------------------------- elements
 function h(tag, props, ...children) {
   const el = document.createElement(tag);
@@ -567,7 +630,8 @@ function decisionPanel(opts) {
   const yes = button({ label: "Yes, dismiss", variant: "primary", icon: "ban", onClick: () => { if (ready()) o.onSave({ action: st.action, reason: st.reason }); } });
   const back = button({ label: "Go back", variant: "ghost", onClick: () => { st.confirming = false; update(); save.focus(); } });
   const confirm = callout({ tone: "unknown", icon: "ban", role: "group", title: "Dismiss settles this finding",
-    text: "If every finding of the claim is settled, it becomes ready for submission. It stays a draft until an administrator appends it.",
+    text: "If every finding of the claim is settled, it becomes ready for submission. " +
+      (Server.live ? "It stays a draft until you save your drafts to the audit log." : "It stays a draft until an administrator appends it."),
     body: h("div", { class: "row" }, yes, back) });
 
   function update() {
@@ -592,7 +656,8 @@ function decisionPanel(opts) {
     h("div", { class: "decision-panel__actions", role: "group", "aria-label": "Review action" }, actions),
     help,
     h("label", { class: "field", for: reasonId }, h("span", {}, "Reason (required) ",
-      h("span", { id: hintId, class: "muted", text: "· saved as a draft in this browser; an administrator adds drafts to the audit log" })), reason),
+      h("span", { id: hintId, class: "muted", text: Server.live ? "· saved as a draft in this browser until you save your drafts to the audit log"
+        : "· saved as a draft in this browser; an administrator adds drafts to the audit log" })), reason),
     o.error ? callout({ tone: "fail", icon: "alert-triangle", role: "alert", title: "Not stored", text: o.error }) : null,
     saveRow, confirm);
   update();
@@ -722,13 +787,53 @@ function discardDraft(entry, ruleId) {
   State.save();
 }
 // Drafts in this browser, never presented as logged (M6). Downloading them
-// is an export, so it is a secondary action here.
+// is an export, so it is a secondary action here. After a save, what it did.
 function draftsBanner() {
   const n = State.drafts.length;
-  if (!n) return null;
-  return callout({ tone: "info", icon: "user", title: `${Core.plural(n, "draft")} in this browser`,
-    text: "Not in the audit log until an administrator appends them.",
-    body: h("div", { class: "row" }, button({ label: `Download decisions (${n})`, icon: "download", onClick: downloadDecisions })) });
+  const notice = Server.notice ? callout({ tone: Server.notice.tone === "fail" ? "fail" : "pass", icon: "history",
+    title: Server.notice.title, text: Server.notice.text }) : null;
+  if (!n) return notice;
+  const drafts = callout({ tone: "info", icon: "user", title: `${Core.plural(n, "draft")} in this browser`,
+    text: draftsWait(), body: draftActions() });
+  return notice ? h("div", { class: "stack" }, notice, drafts) : drafts;
+}
+function draftsWait() {
+  return Server.live ? "Not in the audit log until you save them." : "Not in the audit log until an administrator appends them.";
+}
+// What can be done with the drafts: saved to the audit log through the local
+// server when it answers (B2), and downloaded, always. A refusal lists every
+// problem and keeps every draft; drafts are removed only once saved.
+function draftActions() {
+  const n = State.drafts.length;
+  const download = button({ label: `Download decisions (${n})`, icon: "download", disabled: n === 0, onClick: downloadDecisions });
+  if (!Server.live) return h("div", { class: "row" }, download);
+  if (!Server.canSave) {
+    return h("div", { class: "row" }, linkButton({ href: href("settings"), label: "Sign in to save", icon: "lock", variant: "primary" }), download);
+  }
+  const progress = h("span", { class: "muted small", role: "status" });
+  const problems = h("div");
+  const save = button({ label: `Save to the audit log (${n})`, icon: "send", variant: "primary", disabled: n === 0, onClick: async () => {
+    save.disabled = true;
+    progress.textContent = "Saving…";
+    fill(problems);
+    const sent = State.drafts.slice();
+    const r = await Server.call("POST", "/api/decisions", { decisions: sent });
+    if (r.ok) {
+      State.drafts = State.drafts.filter((d) => !sent.includes(d));
+      State.save();
+      Server.reloadWith({ title: `Saved to the audit log: ${Core.plural(r.data.appended, "decision")}` +
+          (r.data.already_in_chain ? `, ${r.data.already_in_chain} already there` : ""),
+        text: `The audit log holds ${Core.plural(r.data.events_in_chain, "event")}; head ${Core.shortHash(r.data.head)}. ${gateLine(r.data.gate)}` });
+      return;
+    }
+    save.disabled = false;
+    progress.textContent = "";
+    const list = Array.isArray(r.data.problems) ? r.data.problems : [];
+    fill(problems, callout({ tone: "fail", icon: "alert-triangle", role: "alert", title: String(r.data.error || "Not saved."),
+      text: "Every draft is kept in this browser.",
+      body: list.length ? h("ul", { class: "small problems" }, list.map((p) => h("li", { text: String(p) }))) : null }));
+  } });
+  return h("div", { class: "stack stack--tight" }, h("div", { class: "row" }, save, download, progress), problems);
 }
 function downloadDecisions() {
   download(`review_decisions_${RUN_ID.slice(0, 8)}.jsonl`, State.drafts.map((d) => JSON.stringify(d)).join("\n") + "\n");

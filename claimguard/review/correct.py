@@ -85,12 +85,12 @@ def latest_results(claim, folder):
 
 
 def correct_claim(claims_path, claim_id, changes, *, actor, reason, directory, output, log=None, anchor=None,
-                  changes_sha256=None):
+                  changes_sha256=None, command=COMMAND):
     """Recheck one correction; returns the written record. Raises ValueError, writing nothing.
     directory is {actor: role}; the actor must be in it with a role that may
     mark_corrected_for_recheck. changes_sha256 is the SHA-256 of the changes
-    file, recorded in the append_performed event; without a file, the
-    changes' digest is recorded instead."""
+    file, recorded in the append_performed event with command; without a
+    file, the changes' digest is recorded instead."""
     try:
         authorize(directory, actor, "mark_corrected_for_recheck")
     except PermissionDenied as e:
@@ -108,7 +108,7 @@ def correct_claim(claims_path, claim_id, changes, *, actor, reason, directory, o
     if log:
         # The chain first: if it refuses, no version file claims to be recorded.
         chain.append(log, [{"event": "version_created", **run.version.record()}], anchor or chain.default_anchor(log),
-                     performed=(COMMAND, changes_sha256 or chain.digest(changes)))
+                     performed=(command, changes_sha256 or chain.digest(changes)))
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return out, record

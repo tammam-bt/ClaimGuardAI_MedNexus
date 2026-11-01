@@ -8,8 +8,9 @@ Record any clarification or disagreement about a rule **before** changing expect
 2. Should a high-severity UNABLE_TO_ASSESS escalate like a FAIL, and should dismissing a high-severity finding need a second reviewer (DEC-004)?
 3. Where does "route low-confidence or high-severity cases for explicit human approval" come from? It is not in the starter pack.
 4. Is it acceptable that exercise notes (`untrusted_note`) never reach the model, by design?
-5. Please confirm each "team decision" in DEC-001 to DEC-014.
+5. Please confirm each "team decision" in DEC-001 to DEC-016.
 6. Can a held-out claim's `lines` be something other than a list of objects (null, a string)? `src/evaluate.py` then raises `TypeError` while checking line IDs, on any predictions, ours included (DEC-013).
+7. S-05: is the local review server in scope (DEC-015)? And may sign-in stay optional and off by default, given that it proves nothing on a machine where reviewers share the server's account (DEC-016)? Should dismissing a high-severity finding need a second, signed-in reviewer (four-eyes, question 2)?
 
 ## DEC-000 | Template
 
@@ -211,3 +212,26 @@ Record any clarification or disagreement about a rule **before** changing expect
   - A `claims.csv` row that cannot be parsed keeps its reason, "row is not valid CSV"; its child rows are orphans, as before.
 - **Resolution:** Team decision, pending the mentor (open question 5).
 - **Change made:** `claimguard/ingest/csv_folder.py` (adapter version 1.1.0). Tests: `test_nul_rejects_only_its_claim_on_every_version` and `test_an_unparseable_child_row_rejects_every_claim` in `tests/test_csv.py`; the CSV sweep in `tests/test_ingest_fuzz.py` writes its tables by hand, keeps NUL, and checks that no accepted claim lost a row.
+
+## DEC-015 | S-05: a local server for the review page (B0)
+
+- **Date / author:** 2026-10-28 / Mohammed Aziz Kadri
+- **Rule:** none (review workflow, master plan revision 4, Track C)
+- **Question:** the review page is one offline file. A reviewer's decisions reach the audit log only after a download and a command run by an administrator (M9 made that one command). Should a small local server remove that step, at the cost of an HTTP surface to secure?
+- **Smallest example:** two "Confirm issue" decisions on CG-785C09BD9CC8. Offline: Download decisions, then `python -m claimguard.ui.apply`. Served: *Save to the audit log (2)*, and the page shows *In the audit log*.
+- **Expected (gold) vs our reading:** the pack is silent; doc 10 describes "the supplied static interface". Our reading: a server is acceptable if the static file keeps working offline unchanged, the server writes only through the same checks as the command line, and every threat it adds has a check and a test (`docs/THREAT_MODEL.md`).
+- **Resolution:** go, given by the user on 2026-10-28. Pending the mentor (open question 7). If the answer is no, the server is not started and M9 stays the loop: nothing else depends on it.
+- **Change made:** `claimguard/ui/serve.py`; `append_events()` in `claimguard/ui/decisions.py`; `render(served=True)` in `claimguard/ui/page.py`; `command=` in `claimguard/review/correct.py`; the page's `Server` (`ui.js`), the correction builder (`page-claims.js`), the *Local server* card (`page-settings.js`). Tests: `tests/test_ui_serve.py`, `tests/test_ui_serve_e2e.py`.
+
+## DEC-016 | Sign-in on the local server is optional (B4)
+
+- **Date / author:** 2026-10-28 / Mohammed Aziz Kadri
+- **Rule:** none (access control, doc 10: "The supplied static interface uses self-declared reviewer names and does not authenticate users")
+- **Question:** the plan makes sign-in conditional on the mentor and on it being able to mean something. Build it, and turn it on?
+- **Smallest example:** Reviewer 01 signed in tries to save a decision whose actor is Reviewer 02: refused, nothing written. Without `--users`, the same decision is saved, as on the static page.
+- **Expected (gold) vs our reading:** a password checked by a server proves who saved only if the person cannot reach the files behind it. On the prototype's single machine, where reviewers would share the server's account, it does not. Built so the mentor can decide on something real; off unless `--users` is given.
+  - Passwords: scrypt (n = 2^14, r = 8, p = 1, 16-byte salt) in a file the server reads and never writes, set with `python -m claimguard.ui.signin`; names must be in the actor directory, which stays the only source of roles.
+  - Sessions: an `HttpOnly`, `SameSite=Strict` cookie, in memory, 8 hours at most; 5 failed sign-ins lock a name for 60 s; the same message for an unknown name and a wrong password.
+  - Not built: four-eyes approval of high-severity dismissals (DEC-004, open question 2). It needs the mentor's answer first, and sign-in under a separate account to mean anything.
+- **Resolution:** team decision, pending the mentor (open question 7).
+- **Change made:** `claimguard/ui/signin.py`; `--users` in `claimguard/ui/serve.py`. Tests: `SignInTests` in `tests/test_ui_serve.py`.

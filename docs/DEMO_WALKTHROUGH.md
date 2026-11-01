@@ -75,6 +75,23 @@ Record this outside this machine (pull request description, email to the mentor,
 
 Reload the page, then clear the drafts that are now in the log (Settings › Discard all drafts). On the claim, each finding now reads "In the audit log", by Reviewer 01. The Audit Logs page shows the two `review_decision` events and, for an admin, who ran the append.
 
+## 4b. The same, with no terminal: the local server (2 minutes, if B0 stays "go")
+
+Start the server once, as the administrator, on a fresh copy of the run's log:
+
+```bash
+python -m claimguard.ui.serve --results outputs/dev_predictions.jsonl --claims data/development/claims.jsonl     --log outputs/audit.jsonl --directory actors.example.json --corrections outputs/corrections     --gold data/development/expected_results.jsonl
+```
+
+Open the address it prints (`http://127.0.0.1:8765/?token=…`). The token leaves the address bar at once.
+
+- Decide the two findings of CG-785C09BD9CC8 as in section 2. The banner now offers **Save to the audit log (2)** beside the download. Press it: the page reloads, each finding reads "In the audit log", and the notice gives the log's new count and head and the gate's verdict. No file, no command.
+- Show a refusal: Settings › Local server tells what the server checked; a decision on a status that changed is refused with its reason, and the draft stays.
+- **Correct this claim** on CG-B39790AC3604: field *Line L1 › Authorization ID*, new value `AUTH-CG-B39790AC3604-1`, a reason, **Recheck as a new version**. The page reloads on v2: R008 went from failed to passed, R009 now fails. The claim as received is still shown, unchanged.
+- Stop the server with Ctrl+C: it prints the count and head to record. Open `outputs/claimguard.html` as a file: it works as before, offline, and its download is the way in.
+
+Say: the server only removes the download and the command. It runs the same checks, through the same code, and answers only this machine.
+
 ## 5. What the chain detects, and what it cannot (1 minute)
 
 ```bash
@@ -94,4 +111,4 @@ Make the window narrow. Below 1100 px the sidebar becomes a drawer behind the me
 - "Accuracy 1.0" is agreement with the pack's reference labels on the public splits, not clinical or contractual correctness. Nobody has scored the hidden split.
 - The explanations are the rules' own text: no model was called.
 - Reviewer names are self-declared, checked against a directory file. The role switch is a demonstration.
-- The page and the chain run on one machine: no server, no sign-in, no immutable storage.
+- The page and the chain run on one machine, with no immutable storage. The local server answers only that machine. Its sign-in is optional and, on a machine where reviewers share the server's account, proves nothing (DEC-016).
